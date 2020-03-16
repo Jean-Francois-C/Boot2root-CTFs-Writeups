@@ -5,11 +5,9 @@ Walkthrough of the HackLab Vulnix VulnHub VM CTF
 Step 1. Scanning and Enumeration
 	> NMAP scan + user account enumeration using SMTP VRFY command or Finger command
 
-
 Step 2. Gaining access
 	Step 1. Password brute-force attack with ncrack against the Linux accounts the we have enumerated (e.g. root, backup, user, vulnix)
 	Step 2. Log into the Linux server as the 'user' account which is protected by a weak password (letmein)
-
 
 Step 3. Privesc from 'user' account to 'vulnix' account (manual research + LinEnum + Linux-exploit-suggester)
 	Step 1. Logged as 'user', identify the UID of the 'vulnix' account (2008)
@@ -17,7 +15,6 @@ Step 3. Privesc from 'user' account to 'vulnix' account (manual research + LinEn
 	Step 3. Create a new local account with UID '2008' to be able access the NFS share as the user 'vulnix' (known security issue in NFS versions 2 and 3)
 	Step 4. Add our SSH public key to "/home/vulnix/.ssh/authorized_keys"
 	Step 5. Log into the Linux server as the 'vulnix' user
-
 
 Step 4. Privesc from 'vulnix' account to root
 	Step 1. Exploit SUDO misconfiguration (the account 'vulnix' can run SUDOEDIT /etc/exports without password) 
