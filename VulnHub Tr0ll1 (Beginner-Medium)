@@ -4,13 +4,10 @@ Walkthrough of the TR0LL1 VulnHub VM CTF
 
 Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb + Searchsploit)
 
-
 Step 2. Gaining access
 	=> FTP anonymous access > manual pentest > find SSH credentials stored in hidden files on the Webserver
 
-
 Step 3. Linux enumeration (LinEnum.sh + Linux-exploit-suggester.sh)
-
 
 Step 4. Privilege escalation to root
 
