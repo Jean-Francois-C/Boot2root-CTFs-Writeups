@@ -6,7 +6,6 @@ Context / Challenge:
 => The attacker has only access to the 1st VM (Straylight) and has to hack it before pivoting and attacking the 2nd VM (Neuromancer).
 => Attacker <PUBLIC network> Straylight VM <PRIVATE netork> Neuromancer VM
 
-
 Straylight VM
 --------------
 	Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb)
@@ -46,7 +45,6 @@ Neuromancer VM
 
 		  Note: we can also log into the Tomcat manager console as 'Lady3Jane' and upload a JSP webshell or a meterpreter reverse/bind shell (it will run as 'ta')
 
-		
 	Step 8. Privilege escalation to root 
 
 		+ Method 1 - Use the eBPF exploit (CVE-2017-16995)
@@ -56,8 +54,6 @@ Neuromancer VM
 
 		+ Method 2 - CRON misconfiguration
 		  => Logged with the account 'Lady3Jane', create the script '/home/lady3jane/server-check.sh' that is launched by a CRON job with root permission
-
-
 
 
 ======================================================================================================================================================================
