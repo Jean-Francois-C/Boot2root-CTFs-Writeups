@@ -4,13 +4,10 @@ Walkthrough of the SickOS.1.2 VulnHub VM CTF
 
 Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb + Curl)
 
-
 Step 2. Gaining access
 	> Web server misconfiguration (PUT http method) => Webshell => interactive reverse shell (as 'www-data')
 
-
 Step 3. Linux enumeration (LinEnum.sh + Linux-exploit-suggester.sh)
-
 
 Step 4. Privilege escalation to root
 	> Method 1 - Chkrootkit 0.49 exploit (CVE-2014-0476)
