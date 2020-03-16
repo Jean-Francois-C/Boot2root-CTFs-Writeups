@@ -4,7 +4,6 @@ Walkthrough of the SickOS.1.1 VulnHub VM CTF
 
 Step 1. Scanning & Enumeration (Nmap + Nikto + Searchsploit)
 
-
 Step 2. Gaining access
 
 	Method 1
@@ -15,9 +14,7 @@ Step 2. Gaining access
 	--------
 	> Pentest of WolfCMS (Default admin creds + Webshell upload) => interactive reverse shell
 
-
 Step 3. Post-exploitation - Linux enumeration (LinEnum.sh + Linux-exploit-suggester.sh)
-
 
 Step 4. Privilege escalation to root
 
