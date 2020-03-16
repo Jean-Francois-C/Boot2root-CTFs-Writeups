@@ -18,9 +18,7 @@ Step 2. Gaining access
 	2. Use the credentials to login to WordPress
 	3. Upload of a Webshell via WordPress (e.g. using the plugin upload page)
 
-
 Step 3. Post-exploitation - Linux enumeration (LinEnum.sh + Linux-exploit-suggester.sh)
-
 
 Step 4. Privilege escalation to root
 
