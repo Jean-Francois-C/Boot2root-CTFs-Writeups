@@ -5,7 +5,6 @@ Walkthrough of the Typhoon VulnHub VM CTF
 Step 1. Scanning & Enumeration
 	> Nmap + Nikto + Dirb + Searchsploit + Enum4linux + Showmount + FTP test + Metasploit modules
 
-
 Step 2. Gaining Access
 
 	> Apache Struts Web server  (TCP 8080)
@@ -55,16 +54,14 @@ Step 2. Gaining Access
 	> Unauthenticated access to an NFS export share
 	> Unauthenticated access to an FTP server
 	
-	
 Step 3. Linux enumeration (Manual search + scripts: "LinEnum.sh" & "Linux-exploit-suggester.sh")
-
 
 Step 4. Privilege escalation to root
 	> Method 1: the binary 'Vim.basic' is SUID 'root'
 	> Method 2: the linux account 'admin' has SUDO all
 	> Method 3: Linux kernel exploits:
-				+ CVE-2016-5195 - Dirtycow
-				+ CVE-2015-1328 - Overlayfs
+		   + CVE-2016-5195 - Dirtycow
+		   + CVE-2015-1328 - Overlayfs
 
 
 ========================================================================================================
