@@ -4,15 +4,12 @@ Walkthrough of the Fristileaks.1.3 VulnHub VM CTF
 
 Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb)
 
-
 Step 2. Gaining access
 	Step 1. Manual Web application penetration test 
 	Step 2. Upload of a PHP Webshell
 	Step 3. Obtain a reverse shell as 'apache'
 
-
 Step 3. Post-exploitation - Linux enumeration (LinEnum.sh + Linux-exploit-suggester.sh)
-
 
 Step 4. Privilege escalation to root
 	
