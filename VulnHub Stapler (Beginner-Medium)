@@ -4,7 +4,6 @@ Walkthrough of the Stapler VulnHub VM CTF
 
 Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb + Enum4Linux + WPscan)
 
-
 Step 2. Gaining access
 	
 	Method 1
@@ -28,9 +27,7 @@ Step 2. Gaining access
 	     b. Crack the WordPress password hashes and found the Admin credentials (eliot)
 	     c. Login to the WordPress as an admin (eliot) and upload a Webshell via the upload plug-in function
 
-					
 Step 3. Post-exploitation - Linux enumeration (LinEnum.sh + Linux-exploit-suggester.sh + Searchsploit)
-
 
 Step 4. Privilege escalation to root
 
