@@ -5,7 +5,7 @@ Walktrhough of the WinterMute VulnHub 2 VMs CTF
 Context / Challenge: 
 => The attacker has only access to the 1st VM (Straylight) and has to hack it before pivoting and attacking the 2nd VM (Neuromancer).
 => Attacker <PUBLIC network> Straylight VM <PRIVATE netork> Neuromancer VM
-
+ 
 Straylight VM
 --------------
 	Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb)
