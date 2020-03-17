@@ -60,7 +60,7 @@ Useful tools: various scripts, webshells, and reverse shells (source:kali/Github
 Useful tools: various scripts such as 'LinEum', 'Linux Exploit suggster', 'PowerSploit/PowerUp', 'Sherlock' and your owns,  searchsploit/ExploitDB, metasploit framework,..
 ```
 
-##### Step 4 - Pivoting techniques to attack a second boot2root machine only reachable from the 1rst one (some CTFs have several VMs :-))
+##### Step 4 - Pivoting techniques to attack a second VM (or docker containers) only reachable from the 1rst one (some CTFs have several VMs :-))
 ```
 1. Pivoting with SSH tunneling (e.g. dynamic port forward / socks5 proxy / use of proxychain)
 2. Pivoting with Metasploit/Meterpreter (e.g. post/multi/manage/autoroute + socks5 proxy + use of proxychain; "portfwd add" rules)
