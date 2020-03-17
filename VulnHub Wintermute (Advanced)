@@ -9,52 +9,49 @@ Context / Challenge:
 Straylight VM
 --------------
 	Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb)
-		      + Anonymous access to a Postfix SMTP server 
-		      + 2 Web apps are running (80 and 3000) 
-          + The NTOP web portal (port 3000) has default admin credentials (admin:admin)
-		      The 'Flows' pages disclose several web applications' paths for the web running on HTTP port 80: /turing-bolo/ and /freeside/
+		+ Anonymous access to a Postfix SMTP server 
+		+ 2 Web apps are running (80 and 3000) 
+                + The NTOP web portal (port 3000) has default admin credentials (admin:admin)
+		The 'Flows' pages disclose several web applications' paths for the web running on HTTP port 80: /turing-bolo/ and /freeside/
 
 	Step 2. Gaining access
-		      + Injection of a PHP reverse shell in an email that will be logged in "/var/log/mail" (using the SMTP anonymous access)
-		      + One of the 2 Web apps is prone to a LFI vulnerability which allows to execute our PHP reverse shell written in the file "/var/log/mail"
-		      => Obtain a reverse shell as the account 'www-data'
+		+ Injection of a PHP reverse shell in an email that will be logged in "/var/log/mail" (using the SMTP anonymous access)
+		+ One of the 2 Web apps is prone to a LFI vulnerability which allows to execute our PHP reverse shell written in the file "/var/log/mail"
+		=> Obtain a reverse shell as the account 'www-data'
 
 	Step 3. Linux enumeration (manual checks + LinEnum.sh + Linux-exploit-suggester.sh)
 
 	Step 4. Privilege escalation to root
-		      + Screen 4.5.0 (SUID) exploit (CVE-2017-5618)
+		+ Screen 4.5.0 (SUID) exploit (CVE-2017-5618)
 
 	Step 5. Pivoting to attack the Neuromancer VM
-		      + Upload and run a meterpreter linux payload
-		        > use of metasploit's module 'autoroute' to be able to use all the msf scanners and exploits
-		        > add several "local port forward" rules or set up a socks proxy to use other pentesting tools
-		      + Note: there are many other techniques to perform pivoting/lateral movement such as using SOCAT or SSH tunneling...    	
+		+ Upload and run a meterpreter linux payload
+		  > use of metasploit's module 'autoroute' to be able to use all the msf scanners and exploits
+		  > add several "local port forward" rules or set up a socks proxy to use other pentesting tools
+		+ Note: there are many other techniques to perform pivoting/lateral movement such as using SOCAT or SSH tunneling...    	
 
 Neuromancer VM
 ---------------
 	Step 6: Scanning & Enumeration (network port scan + manual checks)
-		      + Only 3 open ports (8009:apj19, 8080:apache Tomcat, 34483:ssh)
+		+ Only 3 open ports (8009:apj19, 8080:apache Tomcat, 34483:ssh)
 
 	Step 7: Gaining access
+	
+		+ Exploit the "Apache Struts2 S2-045" RCE vulnerability (CVE-2017-5638)
+		=> Execute OS command as the user 'ta'
+		
+		+ Find the password of the 'Lady3Jane' account in tomcat-users.xml
+		=> Log into the ssh server as 'Lady3Jane' (port:34483)
 
-		      + Exploit the "Apache Struts2 S2-045" RCE vulnerability (CVE-2017-5638)
-		      => Execute OS command as the user 'ta'
-
-		      + Find the password of the 'Lady3Jane' account in tomcat-users.xml
-		      => Log into the ssh server as 'Lady3Jane' (port:34483)
-
-		      Note: we can also log into the Tomcat manager console as 'Lady3Jane' and upload a JSP webshell or a meterpreter reverse/bind shell (it will run as 'ta')
+		Note: we can also log into the Tomcat manager console as 'Lady3Jane' and upload a JSP webshell or a meterpreter reverse/bind shell (it will run as 'ta')
 
 	Step 8. Privilege escalation to root 
 
-		     + Method 1 - Use the eBPF exploit (CVE-2017-16995)
-		       Notes: 
-		       > we can use either the account 'Lady3Jane' or 'ta'
-		       > the Dirtyc0w exploit (CVE-2016-5195) did not worked on this VM.. 
-
+		+ Method 1 - Use the eBPF exploit (CVE-2017-16995)
+		  Notes: we can use either the account 'Lady3Jane' or 'ta'
+ 
 		+ Method 2 - CRON misconfiguration
-		       => Logged with the account 'Lady3Jane', create the script '/home/lady3jane/server-check.sh' that is launched by a CRON job with root permission
-
+		  => Logged with the account 'Lady3Jane', create the script '/home/lady3jane/server-check.sh' that is launched by a CRON job with root permission
 
 ======================================================================================================================================================================
 Straylight VM
