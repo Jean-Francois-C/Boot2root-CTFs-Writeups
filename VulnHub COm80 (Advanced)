@@ -9,7 +9,6 @@ Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb + manual check..)
 	> Mantis Bug Tracker website
 	> custom FTP server (bestFTPserver)
 
-
 Step 2. Gaining access (as 'b0b' and then as 'al1ce') 
 
 	2.1 Log into the Mantis Bug Tracker website
@@ -19,7 +18,7 @@ Step 2. Gaining access (as 'b0b' and then as 'al1ce')
 
 	2.2 Find several interesting pages that are mentioning security coding issues (BOF - Buffer OverFlow) and hidden commands in the FTP server (ftp104.bkp) 
 
-	2.3 Rebuild the FTP binary (ftp104.bkp) and analyze it 
+	2.3 Rebuild the FTP binary (ftp104.bkp) and analyze it  
            => Identify custom 'hidden' bestFTPserver's commands (e.g. Send-Report, Report-Link, HTTP) using the strings command
 
 	2.4 Use the metasploit framework 'browser autopown' module to generate a malicious HTTP payload that you will execute on the target using the 'Report-Link' or 'HTTP' commands
