@@ -173,10 +173,10 @@ Shellcodes: No Result
 
 ========================================================================================
 
-Failed exploitation attemp - Web server misconfiguration - PUT http method
+Test - Web server misconfiguration - PUT http method
 ---------------------------------------------------------------------------
 
-=> I verified manually the information given by Nikto about the PUT method allow
+=> I verified manually the information given by Nikto about the PUT method that is supposedly allowed..
 
 curl -v -X OPTIONS http://192.168.1.11/
 *   Trying 192.168.1.11...
@@ -233,15 +233,12 @@ You have attempted to execute a CGI, ISAPI, or other executable program from a d
 * Closing connection 0
 
 
-
-
 ========================================================================================
 Step 2. Gaining access and privesc to SYSTEM
 ========================================================================================
 
 
 ************************************** Method 1 ****************************************
-
 
 When I browsed the website I found the following information in the main page's source code:
 
