@@ -17,7 +17,6 @@ Step 2. Gaining access and privilege escalation to 'NT AUTHORITY\SYSTEM'
         1.3  Browse "http://192.168.1.11/Reverseshell.asp" to execute the meterpreter reverse shell
              => Obtain a remote shell running as 'NT AUTHORITY\SYSTEM' on the Windows machine
 
-
         Method 2 (easy/medium)
         ----------------------
         2.1  Perform a brute force attack against the FTP server using the information contained in the blog page's source code 
