@@ -22,7 +22,7 @@ Step 2. Gaining access (as 'b0b' and then as 'al1ce')
            => Identify custom 'hidden' bestFTPserver's commands (e.g. Send-Report, Report-Link, HTTP) using the strings command
 
 	2.4 Use the metasploit framework 'browser autopown' module to generate a malicious HTTP payload that you will execute on the target using the 'Report-Link' or 'HTTP' commands
-	   => Identify that the plugin 'multi/browser/firefox_proto_crmfrequest' could work and change the default payload (set a windows meterpreter shell instead because of it is executed in 'wine')
+	   => Identify that the plugin 'multi/browser/firefox_proto_crmfrequest' could work and change the default Linux payload (set a windows payload instead because it is executed in 'wine')
 	   => Then generate a new malicious Web link and execute it using the  'Report-Link' or 'HTTP' commands
 	   => Obtain a remote shell as the user 'b0b' 
 
