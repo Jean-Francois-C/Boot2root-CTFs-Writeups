@@ -7,7 +7,7 @@ Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb + Searchsploit)
 Step 2. Gaining access and privilege escalation to 'NT AUTHORITY\SYSTEM'
 
         Method 1 (easy)
-	      --------
+	---------------
         1.1  Perform a brute force attack against the FTP server using the information contained in the blog page's source code 
              => Find the password of the user 'bob'
 
@@ -19,7 +19,7 @@ Step 2. Gaining access and privilege escalation to 'NT AUTHORITY\SYSTEM'
 
 
         Method 2 (easy/medium)
-        --------
+        ----------------------
         2.1  Perform a brute force attack against the FTP server using the information contained in the blog page's source code 
              => Find the password of the user 'bob'
 
