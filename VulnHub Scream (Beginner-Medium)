@@ -13,35 +13,35 @@ Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb + Searchsploit + manual test
 
 Step 2. Gaining access and Privilege escalation to 'NT AUTHORITY\SYSTEM'
 
-      Method 1 (easy/medium)
+        Method 1 (easy/medium)
      	----------------------
      	1. Find out that it is possible to upload files in '/www/root/cgi-bin/' via the TFTP server and that the uploaded files can browsed ("http://192.168.1.11/cgi-bin/<file>")
  
-      2. Find out that PERL scripts stored in '/cgi-bin/' are executed (TinyWeb documentation and Internet blog posts)
+        2. Find out that PERL scripts stored in '/cgi-bin/' are executed (TinyWeb documentation and Internet blog posts)
 
-      3. Upload a Perl script (reverse shell) in '/cgi-bin/' and execute it (i.e. "curl http://192.168.1.11/cgi-bin/TinyWebRCE.pl")
+        3. Upload a Perl script (reverse shell) in '/cgi-bin/' and execute it (i.e. "curl http://192.168.1.11/cgi-bin/TinyWebRCE.pl")
 
-      4. Obtain a reverse shell running as the account 'alex' which is member of the local administrator group 
+        4. Obtain a reverse shell running as the account 'alex' which is member of the local administrator group 
 
-      5. Dump the clear-text password of the 'alex' account using one of the multiple methods available:
-	       => Option 1. Upload the tool Mimikatz via TFTP and then use it to elevate to 'NT AUTHORITY\SYSTEM'
+        5. Dump the clear-text password of the 'alex' account using one of the multiple methods available:
+	   => Option 1. Upload the tool Mimikatz via TFTP and then use it to elevate to 'NT AUTHORITY\SYSTEM'
                       and dump the clear-text password of the 'alex' account from memory (lsass).
-  	     => Option 2. Upload the tools PsExec.exe and ProcDump.exe (Sysinternals) via TFTP and then use these tools to elevate to 'NT AUTHORITY\SYSTEM'
+  	   => Option 2. Upload the tools PsExec.exe and ProcDump.exe (Sysinternals) via TFTP and then use these tools to elevate to 'NT AUTHORITY\SYSTEM'
                       and dump the memory of the lsass process. Finally, use Mimikatz to extract offline the clear-text password of the 'alex' account.
-  	     => Option 3. Disable the firewall (since we are local admin), then use a well known exploit such as ms08067 or ms17010 with metasploit to gain a 'SYSTEM' remote shell on this legacy Windows machine (XP)
+  	   => Option 3. Disable the firewall (since we are local admin), then use a well known exploit such as ms08067 or ms17010 with metasploit to gain a 'SYSTEM' remote shell on this legacy Windows machine (XP)
                       and dump the clear-text password with the metasploit's mimikatz module.
-	       => ...
+	   => ...
 
-      Method 2 (very easy)
+        Method 2 (very easy)
     	--------------------
     	1. Exploit the "authentication bypass" vulnerability affecting the Freesshd server v. 2.1.3 using an old exploit available in Metasploit Msf4. 
     	   Notes: 
     		- The new version of the exploit available in msf5 has been modified and it doesn't work against this Legacy Windows machine (XP).	
     		- I tried several other exploits from ExploitDB, and GitHub but none of them worked (I spent time trying to debug them though..).
 
-      2. Obtain a reverse-shell (meterpreter) running with 'NT AUTHORITY\SYSTEM'
+        2. Obtain a reverse-shell (meterpreter) running with 'NT AUTHORITY\SYSTEM'
     
-      3. Dump the clear-text password of the 'alex' account from memory (lsass) with the metasploit's mimikatz module.
+        3. Dump the clear-text password of the 'alex' account from memory (lsass) with the metasploit's mimikatz module.
 
 
 =============================================================================================
