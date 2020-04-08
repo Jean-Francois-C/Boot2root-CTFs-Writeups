@@ -1,6 +1,6 @@
 # Boot2root CTFs
 
-Walkthroughs and notes of boot2root CTFs ('OSCP-like' vulnerable VMs) from VulnHub  that I did for fun the last few years.
+Walkthroughs and notes of boot2root CTFs ('OSCP-like' vulnerable VMs) from VulnHub  that I did for fun.
 I regularly use vulnerable VMs like these ones to organize hands-on penetration testing training sessions for junior security auditors/consultants :-)
 
 
