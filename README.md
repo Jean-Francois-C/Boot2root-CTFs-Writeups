@@ -1,4 +1,4 @@
-# Boot2root CTFs
+# Boot to root CTFs
 
 Walkthroughs and notes of 'boot to root' CTFs mostly from VulnHub that I did for fun. I like to use vulnerable VMs from VulnHub (in addition to the ones I create) to organize hands-on penetration testing training sessions for junior security auditors/consultants :-)
 
