@@ -11,8 +11,8 @@ Mode 'Hard'
 -----------
 
 Step 1. Scanning & Enumeration (Nmap + Nikto + WPscan)
-	    + SSH server (22/tcp)
-	    + Wordpress website (8000/tcp) - 1 user account identified: 'bob'
+	+ SSH server (22/tcp)
+	+ Wordpress website (8000/tcp) - 1 user account identified: 'bob'
 
 Step 2. Gaining access
 
@@ -26,18 +26,18 @@ Step 3. Post-Exploitation and Privilege escalation to become Root
     	1. Review the configuration of the docker image (look for privesc flaws + information gathering)...
 
     	2. Set up a pivot to attack the other docker images available on the 'docker' network 
-         Note: it can be done via many techniques such as a meterpreter shell + portfwd rule or using proxychains and the ReGeorg webshell (it tunnels TCP connection over HTTP)  
+           Note: it can be done via many techniques such as a meterpreter shell + portfwd rule or using proxychains and the ReGeorg webshell (it tunnels TCP connection over HTTP)  
 
     	3. Find out that there is an unprotected/insecure Docker SSH Proxy container and obtain root access on this container
 
-	    4. Review the configuration of this docker container and find out that the docker socket (which is running as root on the Linux host) is exposed in the docker container
+	4. Review the configuration of this docker container and find out that the docker socket (which is running as root on the Linux host) is exposed in the docker container
 
-	    5. Download and install the docker client in this unprotected docker container
+	5. Download and install the docker client in this unprotected docker container
 
-	    6. Perform a privilege escalation attack using the docker client and the exposed docker socket (i.e. run a new container with a volume pointing to the root folder of the hosting Linux server)
-	    => Gain root access to the underlying Linux server 'vulndocker' and to the 3 docker containers
+	6. Perform a privilege escalation attack using the docker client and the exposed docker socket (i.e. run a new container with a volume pointing to the root folder of the hosting Linux server)
+	=> Gain root access to the underlying Linux server 'vulndocker' and to the 3 docker containers
 
-	    7. Create a new account on the Linux server 'vulndocker' and ssh to it.. 
+	7. Create a new account on the Linux server 'vulndocker' and ssh to it.. 
 
 
 Mode 'Easy'
