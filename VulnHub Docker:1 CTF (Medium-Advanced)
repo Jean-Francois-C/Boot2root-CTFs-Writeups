@@ -28,7 +28,7 @@ Step 3. Post-Exploitation and Privilege escalation to become Root
     	2. Set up a pivot to attack the other docker images available on the 'docker' network 
            Note: it can be done via many techniques such as a meterpreter shell + portfwd rule or using proxychains and the ReGeorg webshell (it tunnels TCP connection over HTTP)  
 
-    	3. Find out that there is an unprotected/insecure Docker SSH Proxy container and obtain root access on this container
+    	3. Find out that there is an unprotected Docker SSH Proxy container and obtain root access on this container
 
 	4. Review the configuration of this docker container and find out that the docker socket (which is running as root on the Linux host) is exposed in the docker container
 
