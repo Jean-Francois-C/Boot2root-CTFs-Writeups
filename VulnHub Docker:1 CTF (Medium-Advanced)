@@ -49,16 +49,16 @@ Step 1. Scanning & Enumeration (Nmap + Docker client)
 
 Step 2. Gaining access and Privilege escalation to become Root
 
-    	1. Use the command 'docker -H tcp://<IP> exec -it <container id> <OS command>' to remotely execute OS command as root on the 3 docker containers.
+    	1. Use the command 'docker -H tcp://<IP> exec -it <container id> <OS command>' to remotely execute OS commands as root on the 3 docker containers.
     	=> Gain root access on the 3 docker containers
 
     	2. Use the docker client to remotely run a new wordpress container with a volume pointing to the root folder of the hosting Linux server.
-	    => Gain root access on the Linux server 'vulndocker' which is hosting docker
+	=> Gain root access to the underlying Linux server 'vulndocker'
 	
     	3. Create a new Linux account, then add it to the docker group and finally use it to run the tool 'Docker Bench for Security' that checks 
-      for dozens of common best-practices around deploying Docker containers in production (https://github.com/docker/docker-bench-security)
+        for dozens of common best-practices around deploying Docker containers in production (https://github.com/docker/docker-bench-security)
     	
-      => Numerous docker configuration weaknesses (warnings) are identified by the tool such as:
+        => Numerous docker configuration weaknesses (warnings) are identified by the tool such as:
     	[WARN] 2.1  - Ensure network traffic is restricted between containers on the default bridge
     	[WARN] 2.11  - Ensure that authorization for Docker client commands is enabled
     	[WARN] 2.17  - Ensure containers are restricted from acquiring new privileges
