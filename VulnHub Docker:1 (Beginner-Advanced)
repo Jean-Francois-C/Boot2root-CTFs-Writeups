@@ -11,8 +11,8 @@ Mode 'Hard'
 -----------
 
 Step 1. Scanning & Enumeration (Nmap + Nikto + WPscan)
-	    + SSH server (22/tcp)
-	    + Wordpress website (8000/tcp) - 1 user account identified: 'bob'
+	+ SSH server (22/tcp)
+	+ Wordpress website (8000/tcp) - 1 user account identified: 'bob'
 
 Step 2. Gaining access
 
@@ -44,8 +44,8 @@ Mode 'Easy'
 -----------
 
 Step 1. Scanning & Enumeration (Nmap + Docker client)
-	    + SSH server (22/tcp)
-	    + Anonymous access to the Docker API v. 17.06.0-ce(2375/tcp)
+	+ SSH server (22/tcp)
+	+ Anonymous access to the Docker API v. 17.06.0-ce(2375/tcp)
 
 Step 2. Gaining access and Privilege escalation to become Root
 
@@ -53,27 +53,27 @@ Step 2. Gaining access and Privilege escalation to become Root
     	=> Gain root access on the 3 docker containers
 
     	2. Use the docker client to remotely run a new wordpress container with a volume pointing to the root folder of the hosting Linux server.
-	    => Gain root access to the underlying Linux server 'vulndocker'
+	=> Gain root access to the underlying Linux server 'vulndocker'
 	
     	3. Create a new Linux account, then add it to the docker group and finally use it to run the tool 'Docker Bench for Security' that checks 
-         for dozens of common best-practices around deploying Docker containers in production (https://github.com/docker/docker-bench-security)
+           for dozens of common best-practices around deploying Docker containers in production (https://github.com/docker/docker-bench-security)
     	
          => Numerous docker configuration weaknesses (warnings) are identified by the tool such as:
-    	  [WARN] 2.1  - Ensure network traffic is restricted between containers on the default bridge
+    	[WARN] 2.1  - Ensure network traffic is restricted between containers on the default bridge
       	[WARN] 2.11  - Ensure that authorization for Docker client commands is enabled
-    	  [WARN] 2.17  - Ensure containers are restricted from acquiring new privileges
-    	  [WARN] 4.1  - Ensure a user for the container has been created
+    	[WARN] 2.17  - Ensure containers are restricted from acquiring new privileges
+    	[WARN] 4.1  - Ensure a user for the container has been created
       	[WARN]      * Running as root: content_wordpress_1
       	[WARN]      * Running as root: content_db_1
       	[WARN]      * Running as root: content_ssh_1
       	[WARN] 5.12  - Ensure that the container's root filesystem is mounted as read only
-    	  [WARN]      * Container running with root FS mounted R/W: content_wordpress_1
-    	  [WARN]      * Container running with root FS mounted R/W: content_db_1
-    	  [WARN]      * Container running with root FS mounted R/W: content_ssh_1
+    	[WARN]      * Container running with root FS mounted R/W: content_wordpress_1
+    	[WARN]      * Container running with root FS mounted R/W: content_db_1
+    	[WARN]      * Container running with root FS mounted R/W: content_ssh_1
       	[WARN] 5.25  - Ensure that the container is restricted from acquiring additional privileges
       	[WARN]      * Privileges not restricted: content_wordpress_1
       	[WARN]      * Privileges not restricted: content_db_1
-    	  [WARN]      * Privileges not restricted: content_ssh_1
+    	[WARN]      * Privileges not restricted: content_ssh_1
       	[WARN] 5.31  - Ensure that the Docker socket is not mounted inside any containers
       	[WARN]      * Docker socket shared: content_db_1
       	[WARN]      * Docker socket shared: content_ssh_1
