@@ -7,11 +7,10 @@ Walkthroughs and notes of 'boot to root' CTFs mostly from VulnHub that I did for
 
 ##### Step 1 - Scanning and enumeration
 ```
-   ➤ Network TCP/UDP port scan
-   ➤ Service enumeration and fingerprinting
+   ➤ Network TCP/UDP port scans
+   ➤ Service enumeration (HTTP,FTP,TFTP,SMB,NFS,SAMBA,SNMP,SMTP,..)
    ➤ User enumeration
-   ➤ SMB/NFS/FTP enumeration
-   ➤ Web enumeration
+   ➤ Vulnerability scans
    ➤ ...
    
 Useful tools: nmap port scanner and (NSE) scripts, burp proxy, dirb/gobuster, nikto, various scripts (source:kali/Github/your owns),..
@@ -21,7 +20,7 @@ Useful tools: nmap port scanner and (NSE) scripts, burp proxy, dirb/gobuster, ni
 1. Exploiting security misconfiguration
    ➤ Anonymous access (e.g. FTP/TFTP/NFS/SMB, unprotected web admin console)
    ➤ Default or weak credentials (e.g. Web server, CMS, database, OS)
-   ➤ Web server misconfiguration (e.g. HTTP PUT method allowed > upload a Webshell)
+   ➤ Web server misconfiguration (e.g. Webdav + HTTP PUT method allowed > upload a Webshell)
    ➤ Clear-text passwords stored in 'public' website pages, configuration files, log files
    ➤ ...
    
@@ -43,7 +42,7 @@ Useful tools: nmap port scanner and (NSE) scripts, burp proxy, dirb/gobuster, ni
    ➤ XXE (e.g. <!DOCTYPE foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM "file:///etc/shadow" >]><foo>&xxe;</foo>]>)
    ➤ ...
    
-Useful tools: various scripts, webshells, and reverse shells (source:kali/Github/your owns), searchsploit/ExploitDB, metasploit framework, burp proxy, sqlmap, impacket framework, CrackMapExec, DBvis..
+Useful tools: various scripts, webshells, and reverse shells (source:kali/Github/your owns), searchsploit/ExploitDB, metasploit framework, burp proxy, sqlmap, kadimus, hydra, ncrack, impacket framework, CrackMapExec, DBvis..
 ```
 ##### Step 3 - Post-exploitation and Privilege escalation to become "root" or "Local System"
 ```
