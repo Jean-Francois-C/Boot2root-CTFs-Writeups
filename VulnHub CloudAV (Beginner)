@@ -7,7 +7,7 @@ Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb + Burp)
 Step 2. Gaining access
 
         2.1. Log into the Website
-        > Option a. The value of the 'invite code' is disclosed in a error message if we enter a payload like ";
+        > Option a. The value of the 'invite code' is disclosed in an error message if we enter a payload like ";
         > Option b. Exploit a simple SQL injection vulnerability to bypass the authentication in the 'login' page
         > Option c. Bruteforce the 'invite code' field (trivial valid value = pasword)
 
