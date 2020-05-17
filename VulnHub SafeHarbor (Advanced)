@@ -3,15 +3,15 @@ Walkthrough of the SafeHarbor:1 VulnHub CTF
 =======================================================================================================
 
 Step 1. Scanning & Enumeration (Nmap + Nikto + SearchSploit)
-	      + SSH server (22/tcp)
-	      + OnlineBanking Website (80/tcp)
+	 + SSH server (22/tcp)
+	 + OnlineBanking Website (80/tcp)
 
 Step 2. Gaining access
 
-     	1. Find and exploit an SQL injection flaw in the login page (login.php) that allows to bypass the authentication (manual exploit or SQLmap)
+     	1. Find and exploit a SQL injection flaw in the login page (login.php) that allows to bypass the authentication (manual exploit or SQLmap)
      	   => you can log into the website as admin, bill, etc..
      	   
-     	2. Find and exploit an SQL injection flaw in the transfer page (/OnlineBanking/index.php?p=transfer) using SQLmap
+     	2. Find and exploit a SQL injection flaw in the transfer page (/OnlineBanking/index.php?p=transfer) using SQLmap
      	   => The SQL injection allows to perform SQL queries as root (DBA) on the MySQL database supporting the Webiste
      	   => Recover the clear-text password of all the Website users and the password hahs of the MySQL root user
      	   
@@ -48,8 +48,8 @@ Step 3. Privilege escalation to become Root on the host (Linux server Shafeharbo
     	2. Perform a privilege escalation attack using the docker client and the exposed docker socket (i.e. run a new container with a volume pointing to the root folder of the hosting Linux server)
     	   => Gain root access to the underlying Linux server 'safeharbor' and to the all docker containers
 
-	    3. Change the password of the user 'absozed' to be able to easily log into the Linux server 'safeharbor' and run the tool 'Docker Bench for Security' that checks 
-         for dozens of common best-practices around deploying Docker containers in production (https://github.com/docker/docker-bench-security)
+	3. Change the password of the user 'absozed' to be able to easily log into the Linux server 'safeharbor' and run the tool 'Docker Bench for Security' that checks 
+           for dozens of common best-practices around deploying Docker containers in production (https://github.com/docker/docker-bench-security)
     	   => the docker configuration has not been hardened ;-)
 
 
