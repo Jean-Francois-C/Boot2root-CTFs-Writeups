@@ -13,7 +13,7 @@ Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb)
         > Find the admin portal login page (/_admin/dist/login.html)
 
 Step 2. Gaining Access
-	      1. Find and exploit an unauthenticated stored XSS flow in the web page "buynow.php" that allows to steal the session cookie of an admin
+	1. Find and exploit an unauthenticated stored XSS flow in the web page "buynow.php" that allows to steal the session cookie of an admin
         2. Log into the admin portal using the stolen cookie
         3. Exploit the presence of a "Database admin" page that allows to execute SQL queries to the MySQL backend db
         4. Upload a PHP webshell using the "Database admin" page (SELECT <webshell> DUMP INTOFILE /path/webshell.php)
@@ -26,7 +26,7 @@ Step 3. Post-exploitation - Linux enumeration (Manual search + scripts: "LinEnum
            which can be executed with root privileges thanks to SUID binary "/usr/bin/backup"
 
 Step 4. Privilege escalation to root
-	      => SUID binary + PATH env manipulation = root access
+	=> SUID binary + PATH env manipulation = root access
 
 
 ========================================================================================================================================
