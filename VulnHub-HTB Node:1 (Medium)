@@ -20,12 +20,12 @@ Step 3. Post-exploitation - Linux enumeration (scripts: "LinEnum.sh" & "Linux-ex
 
 Step 4. Privilege escalation to root
 
-        Method 1
-        --------
+        Method 1 (local exploit)
+        ------------------------
         => CVE-2017-16995 - "eBPF_verifier" privilege escalation exploit (exploitdb)
         
-        Method 2 (Insecure scheduler "/var/scheduler/app.js" + SUID binary "/usr/local/bin/backup")
-	      --------
+        Method 2 (insecure scheduler + SUID binary)
+	-------------------------------------------
         1. Identify that the scheduler "/var/scheduler/app.js" is executing code contained in the Mongodb "scheduler" database tasks
         2. Log into the mongodb database with the credentials previously found (mark:5AYRft73VtFpc84) and create a malicious task / backdoor
         3. Gain a shell as the privileged accout "tom" which is running the scheduler
