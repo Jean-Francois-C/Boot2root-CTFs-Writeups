@@ -55,7 +55,7 @@ Useful tools: various scripts, webshells, and reverse shells (source:kali/Github
    ➤ Windows local exploit (e.g. HOT/ROTTEN/JUICY POTATO exploits, MS16-032 Secondary Logon Handle Privesc)
    ➤ Exploit for any vulnerable service/software running with "Local System" or local administrator privilege
    
-Useful tools: various scripts such as 'LinEum', 'Linux Exploit suggster', 'PowerSploit/PowerUp', 'Sherlock' and your owns,  searchsploit/ExploitDB, metasploit framework,..
+Useful tools: various scripts such as 'LinEnum', 'LinPEAS', 'Linux Exploit suggester', 'WinPEAS','PowerSploit/PowerUp', 'Sherlock' and your owns,  searchsploit/ExploitDB, metasploit framework,..
 ```
 
 ##### Step 4 - Pivoting techniques to attack a second VM (or docker containers) only reachable from the 1rst one (some CTFs have several VMs :-))
