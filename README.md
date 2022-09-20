@@ -3,7 +3,7 @@
 Walkthroughs and notes of 'boot to root' CTFs mostly from VulnHub that I did for fun. I like to use vulnerable VMs from VulnHub (in addition to the ones I create) to organize hands-on penetration testing training sessions for junior security auditors/consultants :-)
 
 
-## Classic pentest methodology to do a Boot2root CTF...
+### >> Classic pentest methodology to do a Boot2root CTF <<
 
 ### Step 1 - Scanning and enumeration
 ```
@@ -13,8 +13,8 @@ Walkthroughs and notes of 'boot to root' CTFs mostly from VulnHub that I did for
    ➤ Vulnerability scans
    ➤ ...
 ```
-*Useful tools: [Nmap](https://nmap.org/) (network port scanner and (NSE) scripts), [Burp proxy](https://portswigger.net/burp) (manual & automated Web security testing tool), [Nikto](https://www.kali.org/tools/nikto/) (Web vulnerability scanner), [Dirb](https://www.kali.org/tools/dirb/) & [Gobuster](https://github.com/OJ/gobuster)  (URL bruteforcers), [Kali various tools](https://www.kali.org/tools/), various scripts (source:Github/your owns).*
-
+##### ***Useful tools:*** [Nmap](https://nmap.org/) (network port scanner and (NSE) scripts), [Burp proxy](https://portswigger.net/burp) (manual & automated Web security testing tool), [Nikto](https://www.kali.org/tools/nikto/) (Web vulnerability scanner), [Dirb](https://www.kali.org/tools/dirb/) & [Gobuster](https://github.com/OJ/gobuster)  (URL bruteforcers), [Kali various tools](https://www.kali.org/tools/), various scripts (source:Github/your owns).*
+-------------------
 
 ### Step 2 - Gaining access
 ```
@@ -45,7 +45,8 @@ Walkthroughs and notes of 'boot to root' CTFs mostly from VulnHub that I did for
    ➤ XXE - XML external entity injection  (e.g. <!DOCTYPE foo [<!ELEMENT foo ANY ><!ENTITY xxe SYSTEM "file:///etc/shadow" >]><foo>&xxe;</foo>]>)
    ➤ ...
 ```
-*Useful tools: various scripts, webshells, and reverse shells (source:Github/your owns), [Kali various tools](https://www.kali.org/tools/), [ExploitDB](https://www.exploit-db.com) & [searchsploit](https://www.exploit-db.com/searchsploit) (public exploit database), [Burp proxy](https://portswigger.net/burp) (manual & automated Web security testing), [Sqlmap](https://github.com/sqlmapproject/sqlmap) (automatic SQL injection & DB takeover tool), [kadimus](https://github.com/P0cL4bs/kadimus) (LFI exploit tool), [Metasploit framework](https://www.metasploit.com/) (penetration testing framework), [Impacket framework](https://github.com/SecureAuthCorp/impacket) & [CrackMapExec](https://github.com/Porchetta-Industries/CrackMapExec) (Windows environment pentesting tools), [Hydra](https://www.kali.org/tools/hydra/) / [thc-hydra](https://github.com/vanhauser-thc/thc-hydra) / [ncrack](https://nmap.org/ncrack/) (password bruteforce tools),  [DBvis/DbVisualizer](https://www.dbvis.com/download/) (universal database tool).*
+##### ***Useful tools:*** various scripts, webshells, and reverse shells (source:Github/your owns), [Kali various tools](https://www.kali.org/tools/), [ExploitDB](https://www.exploit-db.com) & [searchsploit](https://www.exploit-db.com/searchsploit) (public exploit database), [Burp proxy](https://portswigger.net/burp) (manual & automated Web security testing), [Sqlmap](https://github.com/sqlmapproject/sqlmap) (automatic SQL injection & DB takeover tool), [kadimus](https://github.com/P0cL4bs/kadimus) (LFI exploit tool), [Metasploit framework](https://www.metasploit.com/) (penetration testing framework), [Impacket framework](https://github.com/SecureAuthCorp/impacket) & [CrackMapExec](https://github.com/Porchetta-Industries/CrackMapExec) (Windows environment pentesting tools), [Hydra](https://www.kali.org/tools/hydra/) / [thc-hydra](https://github.com/vanhauser-thc/thc-hydra) / [ncrack](https://nmap.org/ncrack/) (password bruteforce tools),  [DBvis/DbVisualizer](https://www.dbvis.com/download/) (universal database tool).
+-------------------------------
 
 ### Step 3 - Post-exploitation and Privilege escalation to become "root" or "Local System"
 ```
@@ -58,17 +59,20 @@ Walkthroughs and notes of 'boot to root' CTFs mostly from VulnHub that I did for
    ➤ Windows local exploit (e.g. HOT/ROTTEN/JUICY POTATO exploits, MS16-032 Secondary Logon Handle Privesc)
    ➤ Exploit for any vulnerable service/software running with "Local System" or local administrator privilege
 ```
-*Useful tools: various scripts such as [LinEnum](https://github.com/rebootuser/LinEnum) (Linux enumeration scripts), [LinPEAS & WinPEAS](https://github.com/carlospolop/PEASS-ng) (Linux & Windows enumeration scripts), [Linux Exploit suggester](https://github.com/mzet-/linux-exploit-suggester) / [Linux Exploit suggester 2](https://github.com/jondonas/linux-exploit-suggester-2) (scripts to assess Linux kernel security hardening and exposure on publicly known exploits), [PowerUp PowerShell script](https://github.com/PowerShellMafia/PowerSploit/tree/master/Privesc) & [SharpUP](https://github.com/GhostPack/SharpUp) (Windows privilege escalation tools), [ExploitDB](https://www.exploit-db.com) & [searchsploit](https://www.exploit-db.com/searchsploit) (public exploit database), [Metasploit framework](https://www.metasploit.com/) (penetration testing framework), ...*
+##### ***Useful tools:*** various scripts such as [LinEnum](https://github.com/rebootuser/LinEnum) (Linux enumeration scripts), [LinPEAS & WinPEAS](https://github.com/carlospolop/PEASS-ng) (Linux & Windows enumeration scripts), [Linux Exploit suggester](https://github.com/mzet-/linux-exploit-suggester) / [Linux Exploit suggester 2](https://github.com/jondonas/linux-exploit-suggester-2) (scripts to assess Linux kernel security hardening and exposure on publicly known exploits), [PowerUp PowerShell script](https://github.com/PowerShellMafia/PowerSploit/tree/master/Privesc) & [SharpUP](https://github.com/GhostPack/SharpUp) (Windows privilege escalation tools), [ExploitDB](https://www.exploit-db.com) & [searchsploit](https://www.exploit-db.com/searchsploit) (public exploit database), [Metasploit framework](https://www.metasploit.com/) (penetration testing framework), ...
+------------------------------
 
 ### Step 4 - Pivoting techniques to attack a second VM (or docker containers) only reachable from the 1rst one (some CTFs have several VMs/docker containers :-))
 ```
 1. Pivoting with SSH tunneling (e.g. dynamic port forward / socks5 proxy / use of proxychain)
 2. Pivoting with Metasploit/Meterpreter (e.g. post/multi/manage/autoroute + socks5 proxy + use of proxychain; "portfwd add" rules)
 3. Pivoting with RPIVOT (reverse socks4 proxy, it works like ssh dynamic port forwarding but in the opposite direction)
-4. Pivoting with TCP tunnelling over HTTP via Webshells (e.g. Tunna webshell, reGeorg client/webshell)
-5. Pivoting with SOCAT / RDP / VNC...
+4. Pivoting with TCP tunnelling over HTTP via Webshells (e.g. Tunna webshell, reGeorg and neo-reGeorg client/webshell)
+5. Pivoting with SOCAT / Ligolo / RDP / VNC / ...
 6. ...
 ```
+##### ***Useful tools:*** [Metasploit framework](https://www.metasploit.com/) (penetration testing framework), [Rpivot](https://github.com/klsecservices/rpivot) (reverse socks 4 proxy for penetration tests), [SOCAT](http://www.dest-unreach.org/socat/), [Ligolo](https://github.com/sysdream/ligolo), [Tunna](https://github.com/SECFORCE/Tunna), [ReGeorg](https://github.com/kost/regeorg), [Neo-reGeorg](https://github.com/L-codes/Neo-reGeorg), ...
+---------------------------------
 
 ### Other - Mapping between a few boot2root VulnHub CTFs and common vulnerabilities/exploits
 
