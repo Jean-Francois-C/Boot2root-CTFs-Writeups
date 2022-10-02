@@ -76,25 +76,25 @@ Walkthroughs and notes of 'boot to root' CTFs mostly from VulnHub that I did for
 
 ### Other - Mapping between a few boot2root VulnHub CTFs and common vulnerabilities/exploits
 
-| Boot2root CTF | Anonymous access or Weak password | Insecure file upload function | Webshell | SQLi | LFI | RFI | XXE | OS cmd injection | XSS | Unpatched RCE flaw | Info / Note | 
-| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
-| *Credit Card Scammers* | - | - | X | X | - | - | - | - | X | - | - |
-| *Billu-b0x2* | - | - |- | - | - | - | - | - | - | X | Drupal CMS |
-| *Bobby* | X | - | X | - | - | - | - | - | - | - | - |
-| *CloudAV* | - | - | - | - | - | - | - | X | - | - | - |
-| *DC:8* | - | - | X | X | - | - | - | - | - | - | Drupal CMS |
-| *Vulnerable Docker:1* | X | - | X | - | - | - | - | - | - | - | WordPress CMS & Pivoting technique |
-| *Freshly* | - | - | X | X | - | - | - | - | - | - | - |
-| *Fristileaks.1.3* | - | X | X | - | - | - | - | - | - | - | - |
-| *HackLab Vulnix* | X | - | - | - | - | - | - | - | - | - | - |
-| *MinU:v2* | - | - | - | - | - | - | X | - | - | - |
-| *Mr Robot* | X | - | X | - | - | - | - | - | - | - | WordPress CMS |
-| *SafeHarbor:1* | - | - | - | X | X | X | - | - | - | X | Pivoting technique |
-| *Scream* | X | - | X | - | - | - | - | - | - | X | - |
-| *SickOS.1.1* | X | - | X | - | - | - | - | - | - | X | Pivoting technique |
-| *SickOS.1.2* | - | - | X | - | - | - | - | - | - | - | - |
-| *Stapler* | X | - | X | - | X | - | - | - | - | - | - |
-| *Tr0ll1* | X | - | - | - | - | - | - | - | - | - | - |
-| *Typhoon* | X | - | X | - | - | - | - | - | - | - | X | - | 
-| *VulnOSv2* | - | - | - | X | - | - | - | - | - | X | Drupal CMS |
-| *WinterMute* | X | - | X | - | X | - | - | - | - | X | Pivoting technique |
+| Boot2root CTF | Anonymous access or Weak password | Insecure file upload function | Webshell | SQLi | LFI | RFI | XXE | OS cmd injection | XSS | Unpatched RCE flaw | Docker privesc | Info / Note | 
+| :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
+| *Credit Card Scammers* | - | - | X | X | - | - | - | - | X | - | - | - |
+| *Billu-b0x2* | - | - |- | - | - | - | - | - | - | X | - | Drupal CMS |
+| *Bobby* | X | - | X | - | - | - | - | - | - | - | - | - |
+| *CloudAV* | - | - | - | - | - | - | - | X | - | - | - | - |
+| *DC:8* | - | - | X | X | - | - | - | - | - | - | - | Drupal CMS |
+| *Vulnerable Docker:1* | X | - | X | - | - | - | - | - | - | - | X | WordPress CMS & Pivoting technique |
+| *Freshly* | - | - | X | X | - | - | - | - | - | - | - | - |
+| *Fristileaks.1.3* | - | X | X | - | - | - | - | - | - | - | - | - |
+| *HackLab Vulnix* | X | - | - | - | - | - | - | - | - | - | - | - |
+| *MinU:v2* | - | - | - | - | - | - | X | - | - | - | - |
+| *Mr Robot* | X | - | X | - | - | - | - | - | - | - | - | WordPress CMS |
+| *SafeHarbor:1* | - | - | - | X | X | X | - | - | - | X | X |Pivoting technique |
+| *Scream* | X | - | X | - | - | - | - | - | - | X | - | - |
+| *SickOS.1.1* | X | - | X | - | - | - | - | - | - | X | - | Pivoting technique |
+| *SickOS.1.2* | - | - | X | - | - | - | - | - | - | - | - | - |
+| *Stapler* | X | - | X | - | X | - | - | - | - | - | - | - |
+| *Tr0ll1* | X | - | - | - | - | - | - | - | - | - | - | - |
+| *Typhoon* | X | - | X | - | - | - | - | - | - | X | - | - |
+| *VulnOSv2* | - | - | - | X | - | - | - | - | - | X | - | Drupal CMS |
+| *WinterMute* | X | - | X | - | X | - | - | - | - | X | - | Pivoting technique |
